@@ -82,6 +82,43 @@ This project bridges the gap between your applications and Kibana logs by provid
 1. Update `config.yaml` with your Kibana connection settings
 2. Obtain a Kibana authentication token (see [Authentication](#-authentication))
 
+### Adapting for Your Organization
+
+This Kibana MCP Server can be easily configured for use by any company or organization:
+
+1. **Update Connection Settings**:
+   - Edit `config.yaml` to point to your organization's Kibana instance:
+     ```yaml
+     kibana:
+       url: "https://your-company-kibana.example.com"
+       indices: ["your-company-logs-*"]
+       timestamp_field: "@timestamp"  # Adjust if your org uses a different field name
+     ```
+
+2. **Configure Authentication**:
+   - Obtain a token from your organization's Kibana instance
+   - Provide it using one of the [authentication methods](#-authentication)
+
+3. **Customize Index Patterns**:
+   - Different organizations have different index naming patterns
+   - Update the `indices` field in `config.yaml` to match your log indices
+
+4. **Adjust Field Mappings**:
+   - If your organization uses custom field names:
+     ```yaml
+     field_mappings:
+       timestamp: "your_timestamp_field_name"
+       message: "your_message_field_name"
+       level: "your_log_level_field_name"
+     ```
+
+5. **Test Your Configuration**:
+   ```bash
+   python test_kibana_connection.py
+   ```
+
+Once configured, all team members can use the same setup with their individual session IDs for log tracking and analysis.
+
 ## 🔐 Authentication
 
 The server requires a valid Kibana authentication token to access logs. You have two main options:
