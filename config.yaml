@@ -1,0 +1,87 @@
+# Kibana Log MCP Server Configuration
+
+# Elasticsearch / Kibana connection settings
+elasticsearch:
+  host: "kibana.sso.mum.breeze.juspay.net"
+  port: 443
+  index_prefix: "breeze-v2"  # Changed from istio-logs-v2 to breeze-v2
+  timestamp_field: "start_time"  # This is a common timestamp field in logs
+  auth_cookie: ""  # Set via environment variable KIBANA_AUTH_COOKIE
+  verify_ssl: False
+  kibana_api:
+    version: "7.10.2"
+    base_path: "/_plugin/kibana"
+
+# MCP Server settings
+mcp_server:
+  name: "kibana-logs"
+  version: "1.0.0"
+  host: "kibana.sso.mum.breeze.juspay.net"
+  port: 8000
+  transport: "stdio"  # Options: "stdio", "sse"
+  log_level: "info"  # Options: "debug", "info", "warning", "error"
+
+# Processing Settings
+processing:
+  # Maximum number of logs to return in a single query
+  max_logs: 1000
+  # Time format for timestamps
+  time_format: "iso8601"
+  # Default time range for queries
+  default_time_range: "1h"
+  # Default fields to include in log results
+  default_fields: ["@timestamp", "level", "message", "event", "context"]
+  # Fields to extract for code correlation
+  code_correlation_fields: ["error.stack_trace", "context.file", "context.line"]
+  # Cache TTL for repeated queries
+  cache_ttl_seconds: 300
+  # Query timeout
+  timeout_seconds: 30
+
+# Log source definitions
+log_sources:
+  - name: "istio-logs"
+    description: "Istio service mesh logs"
+    index_pattern: "istio-logs-v2*"
+    timestamp_field: "timestamp"  # Changed from @timestamp to timestamp
+    default_fields:
+      - "message"
+      - "level"
+      - "service"
+  
+  - name: "envoy-edge"
+    description: "Envoy edge proxy logs"
+    index_pattern: "envoy-edge*"
+    timestamp_field: "timestamp"  # Changed from @timestamp to timestamp
+    default_fields:
+      - "message"
+      - "level"
+      - "service"
+
+  - name: "breeze-logs"
+    description: "Breeze application logs"
+    index_pattern: "breeze-v2*"
+    timestamp_field: "timestamp"  # Changed from @timestamp to timestamp
+    default_fields:
+      - "message"
+      - "level"
+      - "service"
+
+# Log Source Configuration
+log_source:
+  # Use either filebeat or direct_path
+  type: "kibana_api"  # Options: filebeat, logstash, direct_path, elasticsearch, kibana_api
+  
+  # Filebeat configuration (if type is filebeat)
+  filebeat:
+    host: "kibana.sso.mum.breeze.juspay.net"
+    port: 5044
+    
+  # Direct path configuration (if type is direct_path)
+  direct_path:
+    path: "/var/log/kibana.json"
+    
+  # Logstash configuration (if type is logstash)
+  logstash:
+    host: "kibana.sso.mum.breeze.juspay.net"
+    port: 5044 
