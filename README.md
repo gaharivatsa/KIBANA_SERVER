@@ -21,6 +21,7 @@
 - [Example Usage](#-example-usage)
 - [Troubleshooting](#-troubleshooting)
 - [Architecture](#-architecture)
+- [AI Integration](#-ai-integration)
 - [License](#-license)
 
 ## 🌟 Overview
@@ -288,6 +289,29 @@ The server consists of:
 - `kibana_mcp_server.py` - Main server with MCP and HTTP support
 - `config.yaml` - Configuration settings
 - Support scripts for testing and token management
+
+## 🤖 AI Integration
+
+To integrate AI tools with this Kibana MCP Server, use the provided `AI_rules_file.txt`:
+
+### Adding to AI Tools
+
+1. Copy the contents of `AI_rules_file.txt` to your AI editor or AI assistant's custom instructions
+2. This ensures your AI tools understand:
+   - How to properly format Kibana queries with session IDs
+   - The appropriate API endpoints for different types of log queries
+   - Required parameters and authentication methods
+   - Best practices for working with the Kibana Logs Tool
+
+### Key AI Usage Requirements
+
+- **Always request `session_id`** from users for all queries
+- **Include `session_id` in all KQL queries** using format: `"{session_id} AND additional_query"`
+- **Use Kibana Query Language (KQL)** for all query formatting
+- **Set auth token first** before using any other endpoint
+- **Parse and present results clearly** in a structured format
+
+For complete AI integration instructions, refer to the `AI_rules_file.txt` in the project root.
 
 ## 📜 License
 
