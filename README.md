@@ -149,6 +149,17 @@ curl -X POST http://localhost:8000/api/set_auth_token \
   -d '{"auth_token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOlsiYXV0aGVudGljYXRlLm11bS5icmVlemUuanVzcGF5Lm5ldCIsImtpZGRZWJhYS5zc28ubXVtLmJyZWV6ZS5qdXNwYXkubmV0Il0sImRhdGFicm9rZXJfcmVjb3JkX3ZlcnNpb24iOjE5NTg5Nzsask1LCJkYXRhYnJva2VyX3NlcnZlcl92ZXJzaW9uIjoyNzcxMDU3MzQwODg2MzY3NzQ0LCJpYXQiOjE3NDgxOTc2ODUsImlkcF9pZCI6IkRFUm9ucmddswc4dkgyM3dtTTNDWGRXNFN1QTY4ZUpTWWtUeEtFWG82R1Rvd2NVIiwiaXNzIjoiYXV0aGVudGljYXRlLm11bS5icmVlemUuanVzcGF5Lm5ldCIsImp0aSI6IjNiZDcyODYzLTSDSDSASDADASDASDASASDASDAMDEtNGJjNi05MmRlLWVhM2QyMDNjOTlmYSIsInN1YiI6IjExNDcxMDI0MTg3OTI2NTU3MDI1MiJ9.gk5HK0NiaeuT_bKROq5a3OmClZ89G0Ndt6Jlkayikxg"}'
 ```
 
+### How to Get Your Authentication Token
+
+To obtain the authentication token from your Kibana instance:
+
+1. Log in to your Kibana dashboard in a web browser
+2. Open browser developer tools (right-click → Inspect or press F12)
+3. Navigate to the "Application" tab in developer tools
+4. In the sidebar, select "Cookies" under "Storage"
+5. Look for the "pomerium" cookie (or similar authentication cookie) for your Kibana domain
+6. Copy the complete cookie value - this is your authentication token
+
 ### Testing Your Token
 
 Validate your token with:
