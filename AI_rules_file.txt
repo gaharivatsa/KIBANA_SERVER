@@ -1,0 +1,152 @@
+# 📊 KIBANA LOGS TOOL - AI USAGE SPECIFICATION
+
+## 🚨 MANDATORY REQUIREMENTS
+1. **ALWAYS request `session_id` from the user** - this is required for all queries
+2. **ALWAYS include `session_id` in KQL queries** using format: `"{session_id} AND additional_query"`
+3. **ALWAYS use Kibana Query Language (KQL)** for all query formatting
+4. **Set auth token first** before using any other endpoint
+5. **Parse and present results clearly** in a structured format
+
+## 🔑 AUTHENTICATION SETUP (REQUIRED FIRST STEP)
+```bash
+curl -X POST http://localhost:8000/api/set_auth_token \
+  -H "Content-Type: application/json" \
+  -d '{"auth_token":"YOUR_AUTH_TOKEN_HERE"}'
+```
+
+Example:
+```bash
+curl -X POST http://localhost:8000/api/set_auth_token -H "Content-Type: application/json" -d '{"auth_token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOlsiYXV0aGVudGljYXRlLm11bS5icmVlemUuanVzcGF5Lm5ldCIsImtpYmFuYS5zc28ubXVtLmJyZWV6ZS5qdXNwYXkubmV0Il0sImRhdGFicm9rZXJfcmVjb3JkX3ZlcnNpb24iOjE5NTg5Nzk1LCJkYXRhYnJva2VyX3NlcnZlcl92ZXJzaW9uIjoyNzcxMDU3MzQwODg2MzY3NzQ0LCJpYXQiOjE3NDgxOTc2ODUsImlkcF9pZCI6IkRFUm9ucmc4dkgyM3dtTTNDWGRXNFN1QTY4ZUpTWWtUeEtFWG82R1Rvd2NVIiwiaXNzIjoiYXV0aGVudGljYXRlLm11bS5icmVlemUuanVzcGF5Lm5ldCIsImp0aSI6IjNiZDcyODYzLTQ1MDEtNGJjNi05MmRlLWVhM2QyMDNjOTlmYSIsInN1YiI6IjExNDcxMDI0MTg3OTI2NTU3MDI1MiJ9.gk5HK0NiaeuT_bKROq5a3OmClZ89G0Ndt6Jlkayikxg"}'
+```
+
+## 📋 API ENDPOINTS REFERENCE
+
+| Endpoint | Primary Use Case | Key Parameters |
+|----------|------------------|----------------|
+| `/api/search_logs` | **MAIN ENDPOINT** - Find specific logs | `query_text`, `max_results`, time filters |
+| `/api/get_recent_logs` | View latest logs | `count`, `level` |
+| `/api/analyze_logs` | Identify patterns | `time_range`, `group_by` |
+| `/api/extract_errors` | Find errors | `hours`, `include_stack_traces`, `limit` |
+| `/api/correlate_with_code` | Link logs to code | `error_message`, `repo_path` |
+| `/api/stream_logs_realtime` | Monitor live logs | `query_text`, duration |
+
+## 🔎 SEARCH_LOGS ENDPOINT - DETAILED SPECIFICATION
+
+### Required Parameters:
+- `query_text`: String using KQL format - MUST include `{session_id}` + query terms
+
+### Optional Parameters:
+- `max_results`: Integer (default: 100) - Number of results to return
+- `start_time`/`end_time`: ISO timestamps or relative time strings (e.g., "24h")
+- `levels`: Array of log levels to include (e.g., ["ERROR", "WARN"])
+- `include_fields`/`exclude_fields`: Arrays of field names
+- `sort_by`: Field to sort by
+- `sort_order`: "asc" or "desc" (default: "desc")
+
+### KQL Query Examples:
+```
+"{session_id} AND error"
+"{session_id} AND payment"
+"{session_id} AND verifyPaymentAttempt"
+"a71e84b1ee00f6247347 AND callStartPayment"
+```
+
+### Complete Examples:
+
+#### 1. Basic Search with Session ID
+```bash
+curl -X POST http://localhost:8000/api/search_logs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query_text": "{session_id} AND payment error",
+    "max_results": 50
+  }'
+```
+
+#### 2. Search with Absolute Time Range
+```bash
+curl -X POST http://localhost:8000/api/search_logs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query_text": "{session_id} AND payment",
+    "start_time": "2025-05-25T00:00:00Z",
+    "end_time": "2025-05-26T00:00:00Z"
+  }'
+```
+
+#### 3. Search with Relative Time
+```bash
+curl -X POST http://localhost:8000/api/search_logs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query_text": "{session_id} AND error",
+    "start_time": "24h"
+  }'
+```
+
+#### 4. Search for Specific Transaction
+```bash
+curl -X POST http://localhost:8000/api/search_logs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query_text": "{session_id} AND verifyPaymentAttempt",
+    "max_results": 1
+  }'
+```
+
+## 📊 OTHER ENDPOINTS - REFERENCE EXAMPLES
+
+### Analyze Logs for Patterns
+```bash
+curl -X POST http://localhost:8000/api/analyze_logs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "time_range": "24h",
+    "group_by": "level"
+  }'
+```
+
+### Fetch Recent Logs
+```bash
+curl -X POST http://localhost:8000/api/get_recent_logs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "count": 10,
+    "level": "ERROR"
+  }'
+```
+
+### Stream Logs in Real-Time
+```bash
+curl -X POST http://localhost:8000/api/stream_logs_realtime \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query_text": "{session_id}"
+  }'
+```
+
+## 🔄 AI DECISION FLOW
+
+1. **Request `session_id` from user** (if not provided)
+2. **Set auth token** (if not already set)
+3. **Determine appropriate endpoint** based on user intent:
+   - For specific searches → `search_logs`
+   - For recent errors → `get_recent_logs` or `extract_errors`
+   - For pattern analysis → `analyze_logs`
+   - For live monitoring → `stream_logs_realtime`
+4. **Construct query** using KQL format: `"{session_id} AND <query terms>"`
+5. **Select appropriate parameters** (time range, result limits, etc.)
+6. **Execute request** using the curl command
+7. **Parse and present results** in a clear, structured format
+
+## 📌 IMPORTANT NOTES
+
+- Always replace `{session_id}` with the actual session ID in queries
+- Prefer absolute time ranges (`start_time` and `end_time`) when possible
+- Include relevant context in queries to narrow results
+- Use field filters (`include_fields` and `exclude_fields`) for large result sets
+- Set appropriate `max_results` to balance detail vs. performance
+
+
+
+

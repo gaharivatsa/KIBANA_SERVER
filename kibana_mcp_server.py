@@ -51,7 +51,7 @@ def configure_logging():
     log_level = CONFIG["mcp_server"]["log_level"].upper()
     logger.remove()
     logger.add(sys.stderr, level=log_level)
-    logger.add("kibana_mcp_server.log", rotation="10 MB", retention="30 days", level=log_level)
+    # logger.add("kibana_mcp_server.log", rotation="10 MB", retention="30 days", level=log_level)
 
 # Initialize the configuration
 CONFIG = load_config()
@@ -60,7 +60,7 @@ CONFIG = load_config()
 log_level = CONFIG["mcp_server"]["log_level"].upper()
 logger.remove()
 logger.add(sys.stderr, level=log_level)
-logger.add("kibana_mcp_server.log", rotation="10 MB", retention="30 days", level=log_level)
+# logger.add("kibana_mcp_server.log", rotation="10 MB", retention="30 days", level=log_level)
 
 # Get authentication details
 es_config = CONFIG["elasticsearch"]
@@ -250,57 +250,32 @@ async def kibana_search(index_pattern: str, query: Dict, size: int = 10, sort: L
                 await asyncio.sleep(1)  # Wait before retrying
     
     # If we reached here, all retries failed
-    logger.warning(f"Returning mock data due to API failure: {last_error}")
+    final_error_message = f"Kibana API request failed after {max_retries} retries."
+    error_details = last_error if last_error else "Unknown error after multiple retries."
+    logger.error(f"{final_error_message} Last error: {error_details}")
     
-    # Return mock data as a fallback
     return {
-        "took": 5,
-        "timed_out": False,
-        "_shards": {"total": 5, "successful": 5, "failed": 0},
-        "hits": {
-            "total": {"value": 3, "relation": "eq"},
-            "max_score": 1.0,
-            "hits": [
-                {
-                    "_index": "mock-index",
-                    "_type": "_doc",
-                    "_id": "1",
-                    "_score": 1.0,
-                    "_source": {
-                        "timestamp": "2025-05-26T01:45:23.123Z",
-                        "level": "INFO",
-                        "message": "Processing payment attempt verification",
-                        "service": "payment-service",
-                        "trace_id": "abc123"
-                    }
-                },
-                {
-                    "_index": "mock-index",
-                    "_type": "_doc",
-                    "_id": "2",
-                    "_score": 1.0,
-                    "_source": {
-                        "timestamp": "2025-05-26T01:45:24.456Z",
-                        "level": "INFO",
-                        "message": "verifyPaymentAttempt called with id=987654",
-                        "service": "payment-service",
-                        "trace_id": "abc123"
-                    }
-                },
-                {
-                    "_index": "mock-index",
-                    "_type": "_doc",
-                    "_id": "3",
-                    "_score": 1.0,
-                    "_source": {
-                        "timestamp": "2025-05-26T01:45:25.789Z",
-                        "level": "INFO",
-                        "message": "Payment verification successful",
-                        "service": "payment-service",
-                        "trace_id": "abc123"
-                    }
-                }
-            ]
+        "error": final_error_message,
+        "details": error_details,
+        "took": 0,
+        "timed_out": True,
+        "_shards": {
+            "total": 0, 
+            "successful": 0, 
+            "skipped": 0, 
+            "failed": 0 
+        },
+        "hits": { 
+            "total": {"value": 0, "relation": "eq"},
+            "max_score": None,
+            "hits": []
+        },
+        "rawResponse": { 
+             "hits": {
+                "total": {"value": 0, "relation": "eq"},
+                "max_score": None,
+                "hits": []
+            }
         }
     }
 
@@ -1180,7 +1155,7 @@ if __name__ == "__main__":
         logger.warning("No authentication cookie provided in environment. You can set it via API or config.")
     
     # Configure logging
-    configure_logging()
+    # configure_logging() # This line might re-add it if not removed from the function itself.
     
     # Parse arguments
     parser = argparse.ArgumentParser(description='Kibana Log MCP Server')

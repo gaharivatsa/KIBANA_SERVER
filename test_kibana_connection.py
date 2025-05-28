@@ -20,7 +20,7 @@ logger.remove()
 logger.add(sys.stderr, level="INFO")
 
 # Set the authentication token for testing
-KIBANA_AUTH_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOlsiYXV0aGVudGljYXRlLm11bS5icmVlemUuanVzcGF5Lm5ldCIsImtpYmFuYS5zc28ubXVtLmJyZWV6ZS5qdXNwYXkubmV0Il0sImRhdGFicm9rZXJfcmVjb3JkX3ZlcnNpb24iOjE5NTg5Nzk1LCJkYXRhYnJva2VyX3NlcnZlcl92ZXJzaW9uIjoyNzcxMDU3MzQwODg2MzY3NzQ0LCJpYXQiOjE3NDgxOTc2ODUsImlkcF9pZCI6IkRFUm9ucmc4dkgyM3dtTTNDWGRXNFN1QTY4ZUpTWWtUeEtFWG82R1Rvd2NVIiwiaXNzIjoiYXV0aGVudGljYXRlLm11bS5icmVlemUuanVzcGF5Lm5ldCIsImp0aSI6IjNiZDcyODYzLTQ1MDEtNGJjNi05MmRlLWVhM2QyMDNjOTlmYSIsInN1YiI6IjExNDcxMDI0MTg3OTI2NTU3MDI1MiJ9.gk5HK0NiaeuT_bKROq5a3OmClZ89G0Ndt6Jlkayikxg"
+KIBANA_AUTH_TOKEN = ""
 
 async def test_connection(config_path="config.yaml"):
     """Test connection to Elasticsearch and retrieve some logs."""

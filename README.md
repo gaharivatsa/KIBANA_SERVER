@@ -1,17 +1,46 @@
-# Kibana MCP (Machine Control Protocol) Server
+# 🔍 Kibana MCP (Machine Control Protocol) Server
 
-A server that provides access to Kibana logs through a convenient API, designed to work with Machine Control Protocol (MCP) and a standard HTTP interface.
+[![Python 3.8+](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
 
-## Overview
+> A powerful server that provides seamless access to Kibana logs through a convenient API, designed to work with Machine Control Protocol (MCP) and a standard HTTP interface.
 
-This project provides:
+## 📋 Table of Contents
+
+- [Overview](#-overview)
+- [Features](#-features)
+- [Setup](#-setup)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
+  - [Configuration](#configuration)
+- [Authentication](#-authentication)
+- [Running the Server](#-running-the-server)
+- [API Reference](#-api-reference)
+  - [Endpoints](#endpoints)
+  - [Parameters](#parameters)
+- [Example Usage](#-example-usage)
+- [Troubleshooting](#-troubleshooting)
+- [Architecture](#-architecture)
+- [License](#-license)
+
+## 🌟 Overview
+
+This project bridges the gap between your applications and Kibana logs by providing:
 
 1. A Kibana log access server using the MCP protocol
 2. HTTP API endpoints for log search and analysis
 3. Tools for debugging Kibana connection issues
 4. Fallback to mock data when Kibana is unavailable
 
-## Setup
+## ✨ Features
+
+- **Simple API**: Easy-to-use endpoints for log searching and analysis
+- **Flexible Authentication**: Multiple ways to provide authentication tokens
+- **Time-Based Searching**: Support for both absolute and relative time ranges
+- **Pattern Analysis**: Tools to identify log patterns and extract errors
+- **Real-Time Streaming**: Monitor logs as they arrive
+
+## 🚀 Setup
 
 ### Prerequisites
 
@@ -21,28 +50,43 @@ This project provides:
 
 ### Installation
 
-1. Clone this repository
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/yourusername/kibana-mcp-server.git
+   cd kibana-mcp-server
+   ```
+
 2. Create a virtual environment:
-   ```
+   ```bash
    python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   
+   # On macOS/Linux
+   source venv/bin/activate
+   
+   # On Windows
+   venv\Scripts\activate
    ```
+
 3. Install dependencies:
-   ```
+   ```bash
    pip install -r requirements.txt
+   ```
+
+4. Make the start script executable:
+   ```bash
+   chmod +x ./run_kibana_mcp.sh
    ```
 
 ### Configuration
 
-1. Copy `.env.example` to `.env` and configure as needed
-2. Update `config.yaml` with your Kibana connection settings
-3. Obtain a Kibana authentication token (see below)
+1. Update `config.yaml` with your Kibana connection settings
+2. Obtain a Kibana authentication token (see [Authentication](#-authentication))
 
-## Authentication Token Management
+## 🔐 Authentication
 
-The server requires a valid Kibana authentication token to access logs. You have several options to provide this token:
+The server requires a valid Kibana authentication token to access logs. You have two main options:
 
-### Option 1: Environment Variable (Recommended)
+### Option 1: Environment Variable
 
 Set the token as an environment variable:
 
@@ -51,39 +95,26 @@ export KIBANA_AUTH_COOKIE="your_token_here"
 ./run_kibana_mcp.sh
 ```
 
-### Option 2: Update .env File
+### Option 2: API Authentication (Recommended)
 
-Add your token to the `.env` file:
+Set the token through the API after starting the server:
 
-```
-KIBANA_AUTH_COOKIE=your_token_here
-```
-
-### Option 3: Update config.yaml
-
-You can also add your token to the `config.yaml` file:
-
-```yaml
-elasticsearch:
-  auth_cookie: "your_token_here"
-   ```
-
-## Getting a Kibana Authentication Token
-
-Run the helper script for instructions:
-
-```
-./get_kibana_token.sh
+```bash
+curl -X POST http://localhost:8000/api/set_auth_token \
+  -H "Content-Type: application/json" \
+  -d '{"auth_token":"your_token_here"}'
 ```
 
-This will guide you through:
-1. Getting a token from your Kibana instance
-2. Checking if your current token is valid
-3. Troubleshooting connection issues
+Example with a token:
+```bash
+curl -X POST http://localhost:8000/api/set_auth_token \
+  -H "Content-Type: application/json" \
+  -d '{"auth_token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOlsiYXV0aGVudGljYXRlLm11bS5icmVlemUuanVzcGF5Lm5ldCIsImtpZGRZWJhYS5zc28ubXVtLmJyZWV6ZS5qdXNwYXkubmV0Il0sImRhdGFicm9rZXJfcmVjb3JkX3ZlcnNpb24iOjE5NTg5Nzsask1LCJkYXRhYnJva2VyX3NlcnZlcl92ZXJzaW9uIjoyNzcxMDU3MzQwODg2MzY3NzQ0LCJpYXQiOjE3NDgxOTc2ODUsImlkcF9pZCI6IkRFUm9ucmddswc4dkgyM3dtTTNDWGRXNFN1QTY4ZUpTWWtUeEtFWG82R1Rvd2NVIiwiaXNzIjoiYXV0aGVudGljYXRlLm11bS5icmVlemUuanVzcGF5Lm5ldCIsImp0aSI6IjNiZDcyODYzLTSDSDSASDADASDASDASASDASDAMDEtNGJjNi05MmRlLWVhM2QyMDNjOTlmYSIsInN1YiI6IjExNDcxMDI0MTg3OTI2NTU3MDI1MiJ9.gk5HK0NiaeuT_bKROq5a3OmClZ89G0Ndt6Jlkayikxg"}'
+```
 
 ### Testing Your Token
 
-You can validate your token with:
+Validate your token with:
 
 ```bash
 python test_kibana_connection.py
@@ -91,163 +122,174 @@ python test_kibana_connection.py
 
 If successful, you should see a list of available indices and sample logs.
 
-## Running the Server
+## 🖥️ Running the Server
 
-### Option 1: HTTP Server (Recommended)
+Start the HTTP server (recommended):
 
-This runs the server with HTTP API endpoints:
-
-```
+```bash
 ./run_kibana_mcp.sh
 ```
 
 The server will be available at http://localhost:8000
 
-### Option 2: MCP Server with stdio
+## 📡 API Reference
 
-For direct integration with MCP clients:
+### Endpoints
 
-```
-export KIBANA_AUTH_COOKIE="your_token_here"
-python kibana_mcp_server.py --transport stdio
-```
+| Endpoint | Description | Method |
+|----------|-------------|--------|
+| `/api/search_logs` | Search logs with a query | POST |
+| `/api/get_recent_logs` | Get the most recent logs | POST |
+| `/api/analyze_logs` | Analyze logs for patterns | POST |
+| `/api/extract_errors` | Extract error logs | POST |
+| `/api/correlate_with_code` | Correlate logs with code | POST |
+| `/api/stream_logs_realtime` | Stream logs in real-time | POST |
+| `/api/set_auth_token` | Set authentication token | POST |
 
-## API Endpoints
+### Parameters
 
-The HTTP server provides these endpoints:
+#### `/api/search_logs` Parameters
 
-- `POST /api/search_logs` - Search logs with a query
-- `POST /api/get_recent_logs` - Get the most recent logs
-- `POST /api/analyze_logs` - Analyze logs for patterns
-- `POST /api/extract_errors` - Extract error logs
-- `POST /api/correlate_with_code` - Correlate logs with code
-- `POST /api/stream_logs_realtime` - Stream logs in real-time
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `query_text` | string | Text to search for in logs | - |
+| `start_time` | string | Start time for logs (ISO format or relative like '1h') | - |
+| `end_time` | string | End time for logs (ISO format) | - |
+| `levels` | array | Log levels to include (e.g., ["error", "warn"]) | - |
+| `include_fields` | array | Fields to include in results | - |
+| `exclude_fields` | array | Fields to exclude from results | - |
+| `max_results` | integer | Maximum number of results | 100 |
+| `sort_by` | string | Field to sort results by | "@timestamp" |
+| `sort_order` | string | Sort order ("asc" or "desc") | "desc" |
 
-### API Parameters
+> ⚠️ **Note**: Use `start_time` and `end_time` for time-based searches, not `time_range`.
 
-#### `/api/search_logs` Parameters:
-- `query_text` (string, optional): Text to search for in logs
-- `start_time` (string, optional): Start time for logs (ISO format or relative like '1h')
-- `end_time` (string, optional): End time for logs (ISO format)
-- `levels` (array, optional): Log levels to include (e.g., ["error", "warn"])
-- `include_fields` (array, optional): Fields to include in results
-- `exclude_fields` (array, optional): Fields to exclude from results
-- `max_results` (integer, optional): Maximum number of results (default: 100)
-- `sort_by` (string, optional): Field to sort results by (e.g., "time", "timestamp", "@timestamp")
-- `sort_order` (string, optional): Sort order ("asc" or "desc", default: "desc")
+#### `/api/analyze_logs` Parameters
 
-⚠️ Note: Use `start_time` and `end_time` for time-based searches, not `time_range`.
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `time_range` | string | Time range to analyze (e.g., "1h", "1d", "7d") | - |
+| `group_by` | string | Field to group results by | "level" |
 
-#### `/api/analyze_logs` Parameters:
-- `time_range` (string, optional): Time range to analyze (e.g., "1h", "1d", "7d")
-- `group_by` (string, optional): Field to group results by (default: "level")
+#### `/api/extract_errors` Parameters
 
-#### `/api/extract_errors` Parameters:
-- `hours` (integer, optional): Number of hours to look back (default: 24)
-- `include_stack_traces` (boolean, optional): Whether to include stack traces (default: true)
-- `limit` (integer, optional): Maximum number of errors to return (default: 10)
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `hours` | integer | Number of hours to look back | 24 |
+| `include_stack_traces` | boolean | Whether to include stack traces | true |
+| `limit` | integer | Maximum number of errors to return | 10 |
 
-## Example Usage
+## 📝 Example Usage
 
-### Search for logs:
-
-```bash
-curl -X POST http://localhost:8000/api/search_logs \
-  -H "Content-Type: application/json" \
-  -d '{"query_text": "payment error", "max_results": 50}'
-```
-
-### Search logs with time range:
+### Search for logs
 
 ```bash
 curl -X POST http://localhost:8000/api/search_logs \
   -H "Content-Type: application/json" \
-  -d '{"query_text": "payment", "start_time": "2025-05-25T00:00:00Z", "end_time": "2025-05-26T00:00:00Z"}'
+  -d '{
+    "query_text": "payment error", 
+    "max_results": 50
+  }'
 ```
 
-### Search using relative time:
+### Search logs with time range
 
 ```bash
 curl -X POST http://localhost:8000/api/search_logs \
   -H "Content-Type: application/json" \
-  -d '{"query_text": "error", "start_time": "24h"}'
+  -d '{
+    "query_text": "payment", 
+    "start_time": "2025-05-25T00:00:00Z", 
+    "end_time": "2025-05-26T00:00:00Z"
+  }'
 ```
 
-### Analyze logs:
+### Search using relative time
+
+```bash
+curl -X POST http://localhost:8000/api/search_logs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query_text": "error", 
+    "start_time": "24h"
+  }'
+```
+
+### Analyze logs
 
 ```bash
 curl -X POST http://localhost:8000/api/analyze_logs \
   -H "Content-Type: application/json" \
-  -d '{"time_range": "24h", "group_by": "level"}'
+  -d '{
+    "time_range": "24h", 
+    "group_by": "level"
+  }'
 ```
 
-### Get recent logs:
+### Get recent logs
 
 ```bash
 curl -X POST http://localhost:8000/api/get_recent_logs \
   -H "Content-Type: application/json" \
-  -d '{"count": 10, "level": "ERROR"}'
+  -d '{
+    "count": 10, 
+    "level": "ERROR"
+  }'
 ```
 
-### Search for specific transaction:
+### Search for specific transaction
 
 ```bash
 curl -X POST http://localhost:8000/api/search_logs \
   -H "Content-Type: application/json" \
-  -d '{"query_text": "verifyPaymentAttempt", "max_results": 1}'
+  -d '{
+    "query_text": "verifyPaymentAttempt", 
+    "max_results": 1
+  }'
 ```
 
-### Search logs with sorting:
+### Stream logs in real-time
 
 ```bash
-curl -X POST http://localhost:8000/api/search_logs \
+curl -X POST http://localhost:8000/api/stream_logs_realtime \
   -H "Content-Type: application/json" \
-  -d '{"query_text": "payment", "sort_by": "time", "sort_order": "desc"}'
+  -d '{
+    "query_text": "payment"
+  }'
 ```
 
-## Troubleshooting
+## 🔧 Troubleshooting
 
 If you encounter issues:
 
-1. Check your authentication token with:
-   ```
-   ./get_kibana_token.sh
-   ```
-
-2. Test Kibana connectivity:
-   ```
+1. **Test Kibana connectivity**:
+   ```bash
    python test_kibana_connection.py
    ```
 
-3. Check timestamp field issues:
+2. **Check timestamp field issues**:
    - If you see "No mapping found for [timestamp]", update the timestamp field in `config.yaml`
    - Different indices may use different field names (`@timestamp`, `timestamp`, `start_time`)
    - The server will attempt to auto-detect and retry without sorting if needed
    - When using `sort_by`, make sure the field exists in your indices
 
-4. HTTP client issues:
-   - The server now properly handles HTTP client lifecycle
-   - If you see any HTTP client errors, try restarting the server
+3. **Authentication problems**:
+   - Ensure your token is valid and not expired
+   - Check that you're using the correct auth endpoint
+   - Verify the token format matches what Kibana expects
 
-5. Check the logs:
-   ```
-   tail -f kibana_mcp_server.log
-   ```
+4. **HTTP client issues**:
+   - The server properly handles HTTP client lifecycle
+   - If you see HTTP client errors, try restarting the server
 
-6. Run the server with debug logging:
-   ```
-   LOG_LEVEL=DEBUG ./run_kibana_mcp.sh
-   ```
-
-## Architecture
+## 🏗️ Architecture
 
 The server consists of:
 
 - `kibana_mcp_server.py` - Main server with MCP and HTTP support
 - `config.yaml` - Configuration settings
 - Support scripts for testing and token management
-- Fallback mechanisms for unreachable Kibana instances
 
-## License
+## 📜 License
 
 This project is proprietary and confidential.
