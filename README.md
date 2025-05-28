@@ -52,7 +52,7 @@ This project bridges the gap between your applications and Kibana logs by provid
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/yourusername/kibana-mcp-server.git
+   git clone https://github.com/gaharivatsa/KIBANA_SERVER.git
    cd kibana-mcp-server
    ```
 
