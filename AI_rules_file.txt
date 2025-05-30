@@ -16,7 +16,7 @@ curl -X POST http://localhost:8000/api/set_auth_token \
 
 Example:
 ```bash
-curl -X POST http://localhost:8000/api/set_auth_token -H "Content-Type: application/json" -d '{"auth_token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOlsiYXV0aGVudGljYXRlLm11bS5icmVlemUuanVzcGF5Lm5ldCIsImtpYmFuYS5zc28ubXVtLmJyZWV6ZS5qdXNwYXkubmV0Il0sImRhdGFicm9rZXJfcmVjb3JkX3ZlcnNpb24iOjE5NTg5Nzk1LCJkYXRhYnJva2VyX3NlcnZlcl92ZXJzaW9uIjoyNzcxMDU3MzQwODg2MzY3NzQ0LCJpYXQiOjE3NDgxOTc2ODUsImlkcF9pZCI6IkRFUm9ucmc4dkgyM3dtTTNDWGRXNFN1QTY4ZUpTWWtUeEtFWG82R1Rvd2NVIiwiaXNzIjoiYXV0aGVudGljYXRlLm11bS5icmVlemUuanVzcGF5Lm5ldCIsImp0aSI6IjNiZDcyODYzLTQ1MDEtNGJjNi05MmRlLWVhM2QyMDNjOTlmYSIsInN1YiI6IjExNDcxMDI0MTg3OTI2NTU3MDI1MiJ9.gk5HK0NiaeuT_bKROq5a3OmClZ89G0Ndt6Jlkayikxg"}'
+curl -X POST http://localhost:8000/api/set_auth_token -H "Content-Type: application/json" -d '{"auth_token":"asdahduwdnsaiuefehasadflhy"}'
 ```
 
 ## 📋 API ENDPOINTS REFERENCE
@@ -40,7 +40,7 @@ curl -X POST http://localhost:8000/api/set_auth_token -H "Content-Type: applicat
 - `start_time`/`end_time`: ISO timestamps or relative time strings (e.g., "24h")
 - `levels`: Array of log levels to include (e.g., ["ERROR", "WARN"])
 - `include_fields`/`exclude_fields`: Arrays of field names
-- `sort_by`: Field to sort by
+- `sort_by`: Field to sort by - MUST use a valid timestamp field name (`timestamp`, `@timestamp`, or `start_time`)
 - `sort_order`: "asc" or "desc" (default: "desc")
 
 ### KQL Query Examples:
@@ -91,6 +91,17 @@ curl -X POST http://localhost:8000/api/search_logs \
   -d '{
     "query_text": "{session_id} AND verifyPaymentAttempt",
     "max_results": 1
+  }'
+```
+
+#### 5. Search with Correct Sorting
+```bash
+curl -X POST http://localhost:8000/api/search_logs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query_text": "{session_id} AND payment",
+    "sort_by": "timestamp",
+    "sort_order": "desc"
   }'
 ```
 
@@ -146,6 +157,31 @@ curl -X POST http://localhost:8000/api/stream_logs_realtime \
 - Include relevant context in queries to narrow results
 - Use field filters (`include_fields` and `exclude_fields`) for large result sets
 - Set appropriate `max_results` to balance detail vs. performance
+
+## ⚠️ TROUBLESHOOTING COMMON ERRORS
+
+### Timestamp Field Issues
+- When using `sort_by`, you MUST use a valid timestamp field that exists in the indices
+- Different indices use different field names for timestamps:
+  - `timestamp` - Used in breeze-logs source
+  - `@timestamp` - Standard Elasticsearch default
+  - `start_time` - Used in main elasticsearch config
+- If you see "No mapping found for [field] in order to sort on" error:
+  1. Try using a different timestamp field name (`timestamp`, `@timestamp`, or `start_time`)
+  2. The server will automatically retry without sorting if it encounters this error
+  3. You can omit the `sort_by` parameter to let the server use its default sorting logic
+
+### Example with Correct Timestamp Field
+```bash
+# Correct - Using a valid timestamp field:
+curl -X POST http://localhost:8000/api/search_logs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query_text": "{session_id} AND error",
+    "sort_by": "timestamp",
+    "sort_order": "desc"
+  }'
+```
 
 
 

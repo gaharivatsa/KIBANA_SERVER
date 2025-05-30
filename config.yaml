@@ -1,26 +1,23 @@
-# Kibana MCP Server - Generic Configuration Template
-# Replace all placeholder values with your actual configuration
-
 # Elasticsearch / Kibana connection settings
 elasticsearch:
-  host: "your-kibana-host.example.com"  # Your Kibana/Elasticsearch host
-  port: 443  # Default is 443 for HTTPS, use 80 for HTTP
-  index_prefix: "your-logs"  # Your log index prefix
-  timestamp_field: "@timestamp"  # Common values: @timestamp, timestamp, start_time
-  auth_cookie: ""  # Leave empty, will be set via API or environment variable
-  verify_ssl: True  # Set to False only in development environments
+  host: "kibana.sso.mum.breeze.juspay.net"
+  port: 443
+  index_prefix: "breeze-v2"  
+  timestamp_field: "start_time" 
+  auth_cookie: ""  
+  verify_ssl: False
   kibana_api:
-    version: "7.10.2"  # Your Kibana version
-    base_path: "/_plugin/kibana"  # Change if your Kibana uses a different base path
+    version: "7.10.2"
+    base_path: "/_plugin/kibana"
 
 # MCP Server settings
 mcp_server:
   name: "kibana-logs"
   version: "1.0.0"
-  host: "0.0.0.0"  # Use 0.0.0.0 to listen on all interfaces
-  port: 8000  # Change if this port is already in use
-  transport: "stdio"  # Options: stdio, http
-  log_level: "info"  # Options: debug, info, warning, error
+  host: "0.0.0.0"
+  port: 8000
+  transport: "http"
+  log_level: "info"  
 
 
 processing:
@@ -39,30 +36,30 @@ processing:
   # Query timeout
   timeout_seconds: 30
 
-# Log source definitions - customize these for your organization's log structure
+# Log source definitions
 log_sources:
-  - name: "service-logs"
-    description: "Main service logs"
-    index_pattern: "service-logs*"
-    timestamp_field: "@timestamp"
+  - name: "istio-logs"
+    description: "Istio service mesh logs"
+    index_pattern: "istio-logs-v2*"
+    timestamp_field: "timestamp"  
     default_fields:
       - "message"
       - "level"
       - "service"
   
-  - name: "infra-logs"
-    description: "Infrastructure logs"
-    index_pattern: "infra-*"
-    timestamp_field: "@timestamp"
+  - name: "envoy-edge"
+    description: "Envoy edge proxy logs"
+    index_pattern: "envoy-edge*"
+    timestamp_field: "timestamp"  
     default_fields:
       - "message"
       - "level"
-      - "component"
+      - "service"
 
-  - name: "app-logs"
-    description: "Application logs"
-    index_pattern: "app-*"
-    timestamp_field: "@timestamp"
+  - name: "breeze-logs"
+    description: "Breeze application logs"
+    index_pattern: "breeze-v2*"
+    timestamp_field: "timestamp"  
     default_fields:
       - "message"
       - "level"
@@ -70,27 +67,16 @@ log_sources:
 
 
 log_source:
-  # Options: kibana_api, filebeat, direct_path, logstash
+ 
   type: "kibana_api" 
   
-  # Configure if using Filebeat
   filebeat:
-    host: "your-filebeat-host.example.com"
+    host: "kibana.sso.mum.breeze.juspay.net"
     port: 5044
     
-  # Configure if reading logs directly from file
   direct_path:
-    path: "/var/log/application.json"
+    path: "/var/log/kibana.json"
     
-  # Configure if using Logstash
   logstash:
-    host: "your-logstash-host.example.com"
+    host: "kibana.sso.mum.breeze.juspay.net"
     port: 5044 
-
-# Add any custom field mappings if your organization uses non-standard field names
-field_mappings:
-  # Examples:
-  # standard_name: "your_custom_field_name"
-  # timestamp: "your_timestamp_field"
-  # message: "log_message"
-  # level: "severity" 

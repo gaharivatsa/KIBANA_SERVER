@@ -1,3 +1,8 @@
+# Copyright (c) 2025 [Harivatsa G A]. All rights reserved.
+# This work is licensed under CC BY-NC-ND 4.0.
+# https://creativecommons.org/licenses/by-nc-nd/4.0/
+# Attribution required. Commercial use and modifications prohibited.
+
 #!/usr/bin/env python3
 """
 Kibana Log MCP Server
@@ -1184,6 +1189,22 @@ if __name__ == "__main__":
             
             # Otherwise return regular JSON response
             return {"message": "Kibana MCP Server", "version": CONFIG["mcp_server"]["version"]}
+        
+        # Add MCP endpoints required by Smithery
+        @app.get("/mcp")
+        async def mcp_get(request: Request):
+            # Handle MCP GET requests (tool listing)
+            return await mcp.handle_http_transport(request)
+            
+        @app.post("/mcp")
+        async def mcp_post(request: Request):
+            # Handle MCP POST requests (tool invocation)
+            return await mcp.handle_http_transport(request)
+            
+        @app.delete("/mcp")
+        async def mcp_delete(request: Request):
+            # Handle MCP DELETE requests (session cleanup)
+            return await mcp.handle_http_transport(request)
         
         # Add new endpoint for setting auth token via HTTP
         @app.post("/api/set_auth_token")

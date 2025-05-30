@@ -1,4 +1,4 @@
-# 🔍 Kibana MCP (Machine Control Protocol) Server
+# 🔍 Kibana MCP (Model Context Protocol) Server
 
 [![Python 3.8+](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
@@ -146,7 +146,7 @@ Example with a token:
 ```bash
 curl -X POST http://localhost:8000/api/set_auth_token \
   -H "Content-Type: application/json" \
-  -d '{"auth_token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOlsiYXV0aGVudGljYXRlLm11bS5icmVlemUuanVzcGF5Lm5ldCIsImtpZGRZWJhYS5zc28ubXVtLmJyZWV6ZS5qdXNwYXkubmV0Il0sImRhdGFicm9rZXJfcmVjb3JkX3ZlcnNpb24iOjE5NTg5Nzsask1LCJkYXRhYnJva2VyX3NlcnZlcl92ZXJzaW9uIjoyNzcxMDU3MzQwODg2MzY3NzQ0LCJpYXQiOjE3NDgxOTc2ODUsImlkcF9pZCI6IkRFUm9ucmddswc4dkgyM3dtTTNDWGRXNFN1QTY4ZUpTWWtUeEtFWG82R1Rvd2NVIiwiaXNzIjoiYXV0aGVudGljYXRlLm11bS5icmVlemUuanVzcGF5Lm5ldCIsImp0aSI6IjNiZDcyODYzLTSDSDSASDADASDASDASASDASDAMDEtNGJjNi05MmRlLWVhM2QyMDNjOTlmYSIsInN1YiI6IjExNDcxMDI0MTg3OTI2NTU3MDI1MiJ9.gk5HK0NiaeuT_bKROq5a3OmClZ89G0Ndt6Jlkayikxg"}'
+  -d '{"auth_token":"hsjddfisdfidsiufiusf"}'
 ```
 
 ### How to Get Your Authentication Token
@@ -363,4 +363,13 @@ For complete AI integration instructions, refer to the `AI_rules_file.txt` in th
 
 ## 📜 License
 
-This project is proprietary and confidential.
+This project is licensed under the Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License (CC BY-NC-ND 4.0).
+
+[![License: CC BY-NC-ND 4.0](https://img.shields.io/badge/License-CC%20BY--NC--ND%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc-nd/4.0/)
+
+This license requires that reusers:
+- Give appropriate credit (Attribution)
+- Do not use the material for commercial purposes (NonCommercial)
+- Do not distribute modified versions (NoDerivatives)
+
+For more information, see the [LICENSE](LICENSE) file.
