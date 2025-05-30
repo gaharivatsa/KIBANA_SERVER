@@ -33,7 +33,7 @@ This project bridges the gap between your applications and Kibana logs by provid
 3. Tools for debugging Kibana connection issues
 4. Fallback to mock data when Kibana is unavailable
 
-## ✨ Features
+##  Features
 
 - **Simple API**: Easy-to-use endpoints for log searching and analysis
 - **Flexible Authentication**: Multiple ways to provide authentication tokens
