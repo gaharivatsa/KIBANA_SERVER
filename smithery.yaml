@@ -5,30 +5,28 @@ type: http
 repo: https://github.com/gaharivatsa/KIBANA_SERVER
 homepage: https://github.com/gaharivatsa/KIBANA_SERVER
 
-start:
-  command: ["python", "kibana_mcp_server.py", "--transport", "http", "--host", "0.0.0.0", "--port", "8000"]
-  port: 8000
-
-build:
-  dockerfile: Dockerfile
-  env:
-    - name: KIBANA_AUTH_COOKIE
-      description: Kibana authentication token
-      required: false
-      default: ""
-
-configSchema:
-  type: object
-  properties:
-    kibana_host:
-      type: string
-      title: "Kibana Host URL"
-      description: "Elasticsearch/Kibana host URL"
-      default: "kibana.sso.mum.breeze.juspay.net"
-    auth_token:
-      type: string
-      title: "Authentication Token"
-      description: "Kibana authentication token"
+startCommand:
+  type: http
+  configSchema:
+    type: object
+    properties:
+      kibana_host:
+        type: string
+        title: "Kibana Host URL"
+        description: "Elasticsearch/Kibana host URL"
+        default: "kibana.sso.mum.breeze.juspay.net"
+      auth_token:
+        type: string
+        title: "Authentication Token"
+        description: "Kibana authentication token"
+  commandFunction: |-
+    (config) => ({
+      "command": "python",
+      "args": ["kibana_mcp_server.py", "--transport", "http", "--host", "0.0.0.0", "--port", "8000"],
+      "env": {
+        "KIBANA_AUTH_COOKIE": config.auth_token || ""
+      }
+    })
 
 endpoints:
   - path: /mcp
@@ -39,4 +37,4 @@ endpoints:
     description: Search Kibana logs
   - path: /api/set_auth_token
     methods: [POST] 
-    description: Set authentication token 
+    description: Set authentication token
