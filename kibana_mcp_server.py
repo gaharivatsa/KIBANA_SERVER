@@ -70,8 +70,6 @@ logger.add(sys.stderr, level=log_level)
 # Get authentication details
 es_config = CONFIG["elasticsearch"]
 kibana_host = es_config['host']
-# Modified to check for dynamic token first
-auth_cookie = DYNAMIC_AUTH_TOKEN or os.environ.get("KIBANA_AUTH_COOKIE") or es_config.get("auth_cookie", "")
 kibana_version = es_config.get("kibana_api", {}).get("version", "7.10.2")
 kibana_base_path = es_config.get("kibana_api", {}).get("base_path", "/_plugin/kibana")
 
@@ -79,10 +77,6 @@ kibana_base_path = es_config.get("kibana_api", {}).get("base_path", "/_plugin/ki
 def get_auth_token():
     global DYNAMIC_AUTH_TOKEN
     return DYNAMIC_AUTH_TOKEN or os.environ.get("KIBANA_AUTH_COOKIE") or es_config.get("auth_cookie", "")
-
-# Validate authentication - remove initial validation to allow setting token via API
-if not auth_cookie:
-    logger.warning("No authentication cookie provided at startup. Please set via API, environment variable, or config.")
 
 # Function to get a properly configured HTTP client
 def get_http_client():
@@ -1190,16 +1184,333 @@ if __name__ == "__main__":
             # Otherwise return regular JSON response
             return {"message": "Kibana MCP Server", "version": CONFIG["mcp_server"]["version"]}
         
-        # Add MCP endpoints required by Smithery
+        # Add MCP endpoints required by Smithery with lazy loading support
         @app.get("/mcp")
         async def mcp_get(request: Request):
-            # Handle MCP GET requests (tool listing)
-            return await mcp.handle_http_transport(request)
+            # Implement lazy loading for tool listing - don't check authentication here
+            try:
+                # Get request ID from query parameters
+                request_id = request.query_params.get("id", "1")
+                
+                # Get the JSON-RPC method from query parameters
+                method = request.query_params.get("method", "")
+                
+                # Only handle list_tools method
+                if method == "list_tools":
+                    # Define tool schemas manually without authentication
+                    tools = [
+                        {
+                            "name": "health",
+                            "description": "Health check endpoint for container monitoring.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {},
+                                "required": []
+                            }
+                        },
+                        {
+                            "name": "set_auth_token",
+                            "description": "Set the Kibana authentication token for the current session.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "auth_token": {
+                                        "type": "string",
+                                        "description": "The authentication token to use for Kibana requests"
+                                    }
+                                },
+                                "required": ["auth_token"]
+                            }
+                        },
+                        {
+                            "name": "search_logs",
+                            "description": "Search Kibana logs with flexible criteria.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "query_text": {
+                                        "type": "string",
+                                        "description": "Text to search for in log messages"
+                                    },
+                                    "start_time": {
+                                        "type": "string",
+                                        "description": "Start time for logs (ISO format or relative like '1h')"
+                                    },
+                                    "end_time": {
+                                        "type": "string",
+                                        "description": "End time for logs (ISO format)"
+                                    },
+                                    "levels": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": "List of log levels to include (e.g., [\"error\", \"warn\"])"
+                                    },
+                                    "include_fields": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": "Fields to include in results"
+                                    },
+                                    "exclude_fields": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": "Fields to exclude from results"
+                                    },
+                                    "max_results": {
+                                        "type": "integer",
+                                        "description": "Maximum number of results to return"
+                                    },
+                                    "sort_by": {
+                                        "type": "string",
+                                        "description": "Field to sort results by"
+                                    },
+                                    "sort_order": {
+                                        "type": "string",
+                                        "description": "Order to sort results (\"asc\" or \"desc\")"
+                                    }
+                                },
+                                "required": []
+                            }
+                        },
+                        {
+                            "name": "get_recent_logs",
+                            "description": "Retrieve the most recent Kibana logs.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "count": {
+                                        "type": "integer",
+                                        "description": "Number of logs to retrieve"
+                                    },
+                                    "level": {
+                                        "type": "string",
+                                        "description": "Filter by log level (e.g., \"info\", \"error\", \"warn\")"
+                                    }
+                                },
+                                "required": []
+                            }
+                        },
+                        {
+                            "name": "analyze_logs",
+                            "description": "Analyze logs to identify patterns and provide statistics.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "time_range": {
+                                        "type": "string",
+                                        "description": "Time range to analyze (e.g. \"1h\", \"1d\", \"7d\")"
+                                    },
+                                    "group_by": {
+                                        "type": "string",
+                                        "description": "Field to group results by (e.g. \"level\", \"service\", \"status\")"
+                                    }
+                                },
+                                "required": []
+                            }
+                        },
+                        {
+                            "name": "extract_errors",
+                            "description": "Extract error logs with optional stack traces.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "hours": {
+                                        "type": "integer",
+                                        "description": "Number of hours to look back"
+                                    },
+                                    "include_stack_traces": {
+                                        "type": "boolean",
+                                        "description": "Whether to include stack traces in results"
+                                    },
+                                    "limit": {
+                                        "type": "integer",
+                                        "description": "Maximum number of errors to return"
+                                    }
+                                },
+                                "required": []
+                            }
+                        },
+                        {
+                            "name": "correlate_with_code",
+                            "description": "Correlate error logs with code locations.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "error_message": {
+                                        "type": "string",
+                                        "description": "Error message to search for"
+                                    },
+                                    "repo_path": {
+                                        "type": "string",
+                                        "description": "Path to the code repository (optional)"
+                                    }
+                                },
+                                "required": ["error_message"]
+                            }
+                        },
+                        {
+                            "name": "stream_logs_realtime",
+                            "description": "Stream logs in real-time for monitoring.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "duration_seconds": {
+                                        "type": "integer",
+                                        "description": "Duration to stream logs for"
+                                    },
+                                    "filter_expression": {
+                                        "type": "string",
+                                        "description": "Expression to filter logs (e.g. \"level:error\")"
+                                    }
+                                },
+                                "required": []
+                            }
+                        }
+                    ]
+                    
+                    # Return JSON-RPC response
+                    return {
+                        "jsonrpc": "2.0",
+                        "result": tools,
+                        "id": request_id
+                    }
+                else:
+                    # For other methods, return error
+                    return {
+                        "jsonrpc": "2.0",
+                        "error": {
+                            "code": -32601,
+                            "message": f"Method '{method}' not found or not supported via GET"
+                        },
+                        "id": request_id
+                    }
+            except Exception as e:
+                logger.error(f"Error handling MCP GET request: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                
+                # Return JSON-RPC error
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32603,
+                        "message": f"Internal error: {str(e)}"
+                    },
+                    "id": request.query_params.get("id", "1")
+                }
             
         @app.post("/mcp")
         async def mcp_post(request: Request):
             # Handle MCP POST requests (tool invocation)
-            return await mcp.handle_http_transport(request)
+            try:
+                # Parse request body
+                body = await request.json()
+                
+                # Get request ID and method
+                request_id = body.get("id", "1")
+                method = body.get("method", "")
+                params = body.get("params", {})
+                
+                # Log the request
+                logger.debug(f"MCP POST request: {method} with params {params}")
+                
+                # Special handling for health check
+                if method == "health":
+                    # Return health status directly
+                    return {
+                        "jsonrpc": "2.0",
+                        "result": {"status": "ok", "version": CONFIG["mcp_server"]["version"]},
+                        "id": request_id
+                    }
+                # Special handling for set_auth_token
+                elif method == "set_auth_token":
+                    # Set auth token
+                    auth_token = params.get("auth_token", "")
+                    if not auth_token:
+                        return {
+                            "jsonrpc": "2.0",
+                            "error": {
+                                "code": -32602,
+                                "message": "Invalid params: auth_token is required"
+                            },
+                            "id": request_id
+                        }
+                    
+                    # Call the set_auth_token function
+                    result = await set_auth_token(auth_token)
+                    
+                    # Return result
+                    return {
+                        "jsonrpc": "2.0",
+                        "result": result,
+                        "id": request_id
+                    }
+                # Handle other tool calls
+                elif method == "get_recent_logs":
+                    result = await get_recent_logs(**params)
+                    return {
+                        "jsonrpc": "2.0",
+                        "result": result,
+                        "id": request_id
+                    }
+                elif method == "search_logs":
+                    result = await search_logs(**params)
+                    return {
+                        "jsonrpc": "2.0",
+                        "result": result,
+                        "id": request_id
+                    }
+                elif method == "analyze_logs":
+                    result = await analyze_logs(**params)
+                    return {
+                        "jsonrpc": "2.0",
+                        "result": result,
+                        "id": request_id
+                    }
+                elif method == "extract_errors":
+                    result = await extract_errors(**params)
+                    return {
+                        "jsonrpc": "2.0",
+                        "result": result,
+                        "id": request_id
+                    }
+                elif method == "correlate_with_code":
+                    result = await correlate_with_code(**params)
+                    return {
+                        "jsonrpc": "2.0",
+                        "result": result,
+                        "id": request_id
+                    }
+                elif method == "stream_logs_realtime":
+                    result = await stream_logs_realtime(**params)
+                    return {
+                        "jsonrpc": "2.0",
+                        "result": result,
+                        "id": request_id
+                    }
+                else:
+                    # Method not found
+                    return {
+                        "jsonrpc": "2.0",
+                        "error": {
+                            "code": -32601,
+                            "message": f"Method '{method}' not found"
+                        },
+                        "id": request_id
+                    }
+            except Exception as e:
+                logger.error(f"Error handling MCP POST request: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                
+                # Return JSON-RPC error
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32603,
+                        "message": f"Internal error: {str(e)}"
+                    },
+                    "id": body.get("id", "1") if isinstance(body, dict) else "1"
+                }
             
         @app.delete("/mcp")
         async def mcp_delete(request: Request):
