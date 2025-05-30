@@ -1,9 +1,9 @@
+version: 1
 name: kibana-logs-server
 description: MCP server for accessing Kibana logs
-version: 1.0.0
-type: http
 repo: https://github.com/gaharivatsa/KIBANA_SERVER
 homepage: https://github.com/gaharivatsa/KIBANA_SERVER
+runtime: container
 
 startCommand:
   type: http
@@ -19,14 +19,14 @@ startCommand:
         type: string
         title: "Authentication Token"
         description: "Kibana authentication token"
-  commandFunction: |-
-    (config) => ({
-      "command": "python",
-      "args": ["kibana_mcp_server.py", "--transport", "http", "--host", "0.0.0.0", "--port", "8000"],
-      "env": {
-        "KIBANA_AUTH_COOKIE": config.auth_token || ""
-      }
-    })
+
+build:
+  dockerfile: Dockerfile
+  dockerBuildPath: "."
+
+env:
+  PYTHONUNBUFFERED: "1"
+  PORT: "8000"
 
 endpoints:
   - path: /mcp

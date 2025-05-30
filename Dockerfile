@@ -6,18 +6,18 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy only the necessary files
-COPY kibana_mcp_server.py config.yaml run_kibana_mcp.sh ./
-COPY AI_rules_file.txt ./
+# Copy all necessary files
+COPY . .
 
 # Make shell script executable
 RUN chmod +x run_kibana_mcp.sh
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
 
-# Expose the port for the HTTP server
+# Expose the port (Smithery will provide PORT env var)
 EXPOSE 8000
 
-# Start HTTP server
+# Command for Smithery HTTP deployment
 CMD ["python", "kibana_mcp_server.py", "--transport", "http", "--host", "0.0.0.0", "--port", "8000"] 
