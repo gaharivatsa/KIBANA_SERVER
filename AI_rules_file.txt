@@ -1,5 +1,6 @@
 # 📊 KIBANA LOGS TOOL - AI USAGE SPECIFICATION
 
+
 ## 🚨 MANDATORY REQUIREMENTS
 1. **ALWAYS request `session_id` from the user** - this is required for all queries
 2. **ALWAYS include `session_id` in KQL queries** using format: `"{session_id} AND additional_query"`
@@ -19,6 +20,32 @@ Example:
 curl -X POST http://localhost:8000/api/set_auth_token -H "Content-Type: application/json" -d '{"auth_token":"asdahduwdnsaiuefehasadflhy"}'
 ```
 
+
+To extract the **Session ID** using the **Order ID** from Kibana logs during the `callStartPayment` phase.
+
+### 🔍 Step-by-Step Rule:
+
+1. **Search Query:**
+
+   ```kibana
+   {Order ID} AND "callStartPayment"
+   ```
+
+   * Replace `{Order ID}` with the actual order ID.
+   * Use Kibana Query Language (KQL) in the query box.
+
+2. **Analyze Response Logs:**
+
+   * Look for log lines that start with this pattern:
+
+     ```
+     message:{num} | {some_id} | {session_id} |
+     ```
+
+     * The line always starts with a prefix like `message:`num followed by two pipe-separated values.
+     * The **third segment** (after the second `|`) is the **Session ID**.
+
+---
 ## 📋 API ENDPOINTS REFERENCE
 
 | Endpoint | Primary Use Case | Key Parameters |
