@@ -2,7 +2,7 @@
 
 
 ## 🚨 MANDATORY REQUIREMENTS
-1. **ALWAYS request `session_id` from the user** - this is required for all queries
+1. **ALWAYS request `session_id` from the user , if not given ask whether can i use order id to get id and proceed . if yes then do so ** - this is required for all queries
 2. **ALWAYS include `session_id` in KQL queries** using format: `"{session_id} AND additional_query"`
 3. **ALWAYS use Kibana Query Language (KQL)** for all query formatting
 4. **Set auth token first** before using any other endpoint
@@ -46,6 +46,16 @@ To extract the **Session ID** using the **Order ID** from Kibana logs during the
      * The **third segment** (after the second `|`) is the **Session ID**.
 
 ---
+
+** Function based mode Begin  ** 
+
+this will be triggered by user saying search based on functions
+
+- if this mode is used : all your query text must have {session_id} AND ("FunctionCallResult" OR "FunctionCalled") + query terms 
+
+- always use sort by timestamp and sort order asc in this mode
+
+** Function based mode End. **
 ## 📋 API ENDPOINTS REFERENCE
 
 | Endpoint | Primary Use Case | Key Parameters |
