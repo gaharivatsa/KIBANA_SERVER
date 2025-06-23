@@ -40,6 +40,9 @@ This project bridges the gap between your applications and Kibana logs by provid
 - **Time-Based Searching**: Support for both absolute and relative time ranges
 - **Pattern Analysis**: Tools to identify log patterns and extract errors
 - **Real-Time Streaming**: Monitor logs as they arrive
+- **🧠 AI-Powered Analysis**: Intelligent log summarization using [Neurolink](https://www.npmjs.com/package/@juspay/neurolink) with 9 AI providers
+- **Smart Chunking**: Automatically handles large log sets with intelligent chunking and analysis combination
+- **Fallback Analysis**: Provides basic analysis even when AI services are unavailable
 
 ## 🚀 Setup
 
@@ -75,6 +78,24 @@ This project bridges the gap between your applications and Kibana logs by provid
 4. Make the start script executable:
    ```bash
    chmod +x ./run_kibana_mcp.sh
+   ```
+
+5. **Optional: Set up AI-powered log analysis**:
+   ```bash
+   # Install Node.js if not already installed (required for Neurolink)
+   # Visit https://nodejs.org/ or use your package manager
+   
+   # Set your AI provider API key (recommended for full AI features).
+   # You can set them as environment variables (shown below) 
+   # OR directly in config.yaml under the 'ai_providers' section.
+   # Keys in config.yaml will override environment variables.
+   
+   # Example using environment variables:
+   export GOOGLE_AI_API_KEY=\"your-google-ai-api-key\" # Recommended (free tier)
+   # export OPENAI_API_KEY=\"your-openai-key\"
+   
+   # Neurolink will be automatically set up when you start the server using ./run_kibana_mcp.sh
+   # The server will log which keys it is using (from env or config.yaml).
    ```
 
 ### Configuration
@@ -190,9 +211,11 @@ The server will be available at http://localhost:8000
 | `/api/get_recent_logs` | Get the most recent logs | POST |
 | `/api/analyze_logs` | Analyze logs for patterns | POST |
 | `/api/extract_errors` | Extract error logs | POST |
-| `/api/correlate_with_code` | Correlate logs with code | POST |
-| `/api/stream_logs_realtime` | Stream logs in real-time | POST |
+
+| `/api/summarize_logs` | 🧠 AI-powered log analysis with Neurolink | POST |
 | `/api/set_auth_token` | Set authentication token | POST |
+| `/api/discover_indexes` | Discover available Elasticsearch indexes | GET |
+| `/api/set_current_index` | Set the current index to use for searches | POST |
 
 ### Parameters
 
@@ -227,83 +250,165 @@ The server will be available at http://localhost:8000
 | `include_stack_traces` | boolean | Whether to include stack traces | true |
 | `limit` | integer | Maximum number of errors to return | 10 |
 
+#### `/api/summarize_logs` Parameters
+
+🧠 **AI-Powered Log Analysis**: This endpoint uses [Neurolink](https://www.npmjs.com/package/@juspay/neurolink) to generate intelligent analysis of your logs.
+
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `query_text` | string | Text to search for in logs | - |
+| `start_time` | string | Start time for logs (ISO format or relative like '1h') | - |
+| `end_time` | string | End time for logs (ISO format) | - |
+| `levels` | array | Log levels to include (e.g., ["error", "warn"]) | - |
+| `include_fields` | array | Fields to include in results | - |
+| `exclude_fields` | array | Fields to exclude from results | - |
+| `max_results` | integer | Maximum number of results | 100 |
+| `sort_by` | string | Field to sort results by | "@timestamp" |
+| `sort_order` | string | Sort order ("asc" or "desc") | "desc" |
+
+**Response Format**: Returns structured AI analysis including:
+- **Summary**: Overview of log activities and systems involved
+- **Key Insights**: Important patterns, behaviors, and recurring themes
+- **Errors**: All errors and exceptions with details
+- **Function Calls**: Critical functions and methods identified
+- **Timestamp Flow**: Chronological reconstruction of events
+- **Anomalies**: Suspicious behavior and inconsistencies
+- **Focus Areas**: Areas requiring developer attention
+- **Recommendations**: Suggested next steps and fixes
+
+#### `/api/discover_indexes` Parameters
+
+This endpoint doesn't require any parameters. It returns a list of all available indexes.
+
+#### `/api/set_current_index` Parameters
+
+| Parameter | Type | Description | Required |
+|-----------|------|-------------|----------|
+| `index_pattern` | string | The index pattern to use for searching logs | Yes |
+
+> 💡 **Tip**: Use `discover_indexes` to find available indexes, and then use `set_current_index` to select which one to use for searches.
+
 ## 📝 Example Usage
 
-### Search for logs
+### Search Logs
 
 ```bash
 curl -X POST http://localhost:8000/api/search_logs \
   -H "Content-Type: application/json" \
   -d '{
-    "query_text": "payment error", 
-    "max_results": 50
+    "query_text": "error",
+    "start_time": "1h",
+    "max_results": 20
   }'
 ```
 
-### Search logs with time range
-
-```bash
-curl -X POST http://localhost:8000/api/search_logs \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query_text": "payment", 
-    "start_time": "2025-05-25T00:00:00Z", 
-    "end_time": "2025-05-26T00:00:00Z"
-  }'
-```
-
-### Search using relative time
-
-```bash
-curl -X POST http://localhost:8000/api/search_logs \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query_text": "error", 
-    "start_time": "24h"
-  }'
-```
-
-### Analyze logs
-
-```bash
-curl -X POST http://localhost:8000/api/analyze_logs \
-  -H "Content-Type: application/json" \
-  -d '{
-    "time_range": "24h", 
-    "group_by": "level"
-  }'
-```
-
-### Get recent logs
+### Get Recent Logs
 
 ```bash
 curl -X POST http://localhost:8000/api/get_recent_logs \
   -H "Content-Type: application/json" \
   -d '{
-    "count": 10, 
-    "level": "ERROR"
+    "count": 10,
+    "level": "error"
   }'
 ```
 
-### Search for specific transaction
+### Discover Available Indexes
 
 ```bash
-curl -X POST http://localhost:8000/api/search_logs \
+curl -X GET http://localhost:8000/api/discover_indexes
+```
+
+Response:
+```json
+{
+  "success": true,
+  "message": "Found 5 index patterns. Current index: breeze-v2-*",
+  "index_patterns": [
+    "breeze-v2-*", 
+    "estio-logs-*", 
+    "istio-logs-*", 
+    "envoy-edge-*", 
+    "kibana-*"
+  ],
+  "current_index": "breeze-v2-*"
+}
+```
+
+### Set Current Index
+
+```bash
+curl -X POST http://localhost:8000/api/set_current_index \
   -H "Content-Type: application/json" \
   -d '{
-    "query_text": "verifyPaymentAttempt", 
-    "max_results": 1
+    "index_pattern": "estio-logs-*"
   }'
 ```
 
-### Stream logs in real-time
+Response:
+```json
+{
+  "success": true,
+  "message": "Current index pattern set to: estio-logs-*"
+}
+```
+
+After setting the index, all subsequent log searches will use the specified index until it's changed again.
+
+### AI-Powered Log Analysis
 
 ```bash
-curl -X POST http://localhost:8000/api/stream_logs_realtime \
+curl -X POST http://localhost:8000/api/summarize_logs \
   -H "Content-Type: application/json" \
   -d '{
-    "query_text": "payment"
+    "query_text": "error", 
+    "max_results": 50,
+    "start_time": "1h"
   }'
+```
+
+**Example Response**:
+```json
+{
+  "success": true,
+  "analysis": {
+    "summary": "Analysis of 42 error logs showing database connection issues and payment processing failures over the last hour.",
+    "key_insights": [
+      "Database connection timeout occurred 15 times",
+      "Payment gateway returned 503 errors for 8 transactions",
+      "Retry mechanism activated in 67% of failed cases"
+    ],
+    "errors": [
+      "ConnectionTimeout: Database connection failed after 30s",
+      "PaymentGatewayError: Service temporarily unavailable (503)"
+    ],
+    "function_calls": [
+      "processPayment()",
+      "connectToDatabase()",
+      "retryTransaction()"
+    ],
+    "timestamp_flow": "Errors started at 14:23 with database issues, escalated to payment failures by 14:45",
+    "anomalies": [
+      "Unusual spike in connection timeouts between 14:30-14:40",
+      "Payment success rate dropped to 23% (normal: 98%)"
+    ],
+    "focus_areas": [
+      "Database connection pool configuration",
+      "Payment gateway health monitoring",
+      "Retry logic optimization"
+    ],
+    "recommendations": [
+      "Increase database connection timeout from 30s to 60s",
+      "Implement circuit breaker for payment gateway",
+      "Add monitoring alerts for connection pool exhaustion"
+    ]
+  },
+  "search_metadata": {
+    "total_logs": 42,
+    "query": "error",
+    "indices_searched": "app-logs-*"
+  }
+}
 ```
 
 ## 🔧 Troubleshooting

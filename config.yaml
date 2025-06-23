@@ -2,7 +2,7 @@
 elasticsearch:
   host: "kibana.sso.mum.breeze.juspay.net"
   port: 443
-  index_prefix: "breeze-v2"  
+  index_prefix: ""  # Default index prefix - can be overridden with set_current_index
   timestamp_field: "start_time" 
   auth_cookie: ""  
   verify_ssl: False
@@ -26,7 +26,7 @@ processing:
   # Time format for timestamps
   time_format: "iso8601"
   # Default time range for queries
-  default_time_range: "1h"
+  default_time_range: "1d"
   # Default fields to include in log results
   default_fields: ["@timestamp", "level", "message", "event", "context"]
   # Fields to extract for code correlation
@@ -34,7 +34,7 @@ processing:
   # Cache TTL for repeated queries
   cache_ttl_seconds: 300
   # Query timeout
-  timeout_seconds: 30
+  timeout_seconds: 60
 
 # Log source definitions
 log_sources:
@@ -80,3 +80,21 @@ log_source:
   logstash:
     host: "kibana.sso.mum.breeze.juspay.net"
     port: 5044 
+
+# AI Provider API Keys (optional - will override environment variables if set)
+# It's generally recommended to use environment variables for secrets,
+# but you can configure them here for convenience.
+# Ensure this file is appropriately secured if you store keys here.
+ai_providers:
+  google_ai_api_key: "AIzaSyAaw8DtBQUZ-sRKOvTxiMRpzUQnemdIH2M"  # e.g., "AIza..."
+  openai_api_key: ""     # e.g., "sk-..."
+  anthropic_api_key: ""  # e.g., "sk-ant-..."
+  # Add other Neurolink supported provider keys here as needed
+  # Example: bedrock_access_key_id: "", bedrock_secret_access_key: "" 
+
+# AI response configuration
+ai_response_settings:
+  max_tokens: 8000000  # Maximum tokens for AI responses
+  temperature: 0.2     # Lower temperature for more detailed and precise output
+  detailed_mode: true  # Enable detailed mode for responses
+  timeout_ms: 600000   # 10 minutes timeout in milliseconds 

@@ -1,9 +1,8 @@
+#!/usr/bin/env python3
 # Copyright (c) 2025 [Harivatsa G A]. All rights reserved.
 # This work is licensed under CC BY-NC-ND 4.0.
 # https://creativecommons.org/licenses/by-nc-nd/4.0/
 # Attribution required. Commercial use and modifications prohibited.
-
-#!/usr/bin/env python3
 """
 Kibana Log MCP Server
 
@@ -40,6 +39,9 @@ from sse_starlette.sse import EventSourceResponse
 
 # Store the dynamic auth token
 DYNAMIC_AUTH_TOKEN = None
+
+# Store the current selected index
+CURRENT_INDEX = None
 
 # Load configuration
 def load_config(config_path: str = "config.yaml") -> Dict:
@@ -107,6 +109,14 @@ async def health():
 # Helper function to interact with Kibana API
 async def kibana_search(index_pattern: str, query: Dict, size: int = 10, sort: List = None, aggs: Dict = None) -> Dict:
     """Execute a search query through Kibana API."""
+    global CURRENT_INDEX
+    
+    # Use the dynamically selected index if available, otherwise use the provided one
+    actual_index = CURRENT_INDEX or index_pattern
+    
+    # Log which index we're using
+    logger.debug(f"Searching in index: {actual_index} (user requested: {index_pattern})")
+    
     # Prepare the search request
     url = f"https://{kibana_host}{kibana_base_path}/internal/search/es"
     
@@ -121,10 +131,10 @@ async def kibana_search(index_pattern: str, query: Dict, size: int = 10, sort: L
     
     # Check the index pattern to see if we have a specific config for it
     for source in CONFIG.get('log_sources', []):
-        if source.get('index_pattern') and index_pattern.startswith(source.get('index_pattern').rstrip('*')):
+        if source.get('index_pattern') and actual_index.startswith(source.get('index_pattern').rstrip('*')):
             if 'timestamp_field' in source:
                 timestamp_field = source.get('timestamp_field')
-                logger.debug(f"Using timestamp field '{timestamp_field}' for index {index_pattern}")
+                logger.debug(f"Using timestamp field '{timestamp_field}' for index {actual_index}")
                 break
     
     # Add sort if provided and if we know the index has the field
@@ -142,7 +152,7 @@ async def kibana_search(index_pattern: str, query: Dict, size: int = 10, sort: L
     # Format for the data API
     payload = {
         "params": {
-            "index": index_pattern,
+            "index": actual_index,
             "body": search_body
         }
     }
@@ -804,305 +814,980 @@ async def extract_errors(
         return {"error": str(e)}
 
 
-@mcp.tool()
-async def correlate_with_code(
-    error_message: str,
-    repo_path: Optional[str] = None,
-    ctx: Context = None
-) -> Dict:
-    """
-    Correlate error logs with code locations.
-    
-    Args:
-        error_message: Error message to search for
-        repo_path: Path to the code repository (optional)
-        
-    Returns:
-        Dict containing potential code locations and context
-    """
-    # Build query to find logs with the error message
-    query = {
-        "bool": {
-            "must": [
-                {
-                    "match_phrase": {
-                        "message": error_message
-                    }
-                },
-                {
-                    "terms": {
-                        "level": ["error", "fatal", "critical"]
-                    }
-                }
-            ]
-        }
-    }
-    
-    try:
-        # Execute search
-        index_pattern = f"{es_config['index_prefix']}*"
-        result = await kibana_search(index_pattern, query, size=10)
-        
-        if "error" in result:
-            logger.error(f"Error correlating with code: {result['error']}")
-            return {"error": result["error"]}
-        
-        # Process results
-        logs = [doc["_source"] for doc in result["hits"]["hits"]]
-        
-        # Extract code locations from logs
-        code_locations = []
-        for log in logs:
-            locations = extract_code_locations(log)
-            code_locations.extend(locations)
-            
-        # If repo path is provided, try to find the files
-        if repo_path and code_locations:
-            for location in code_locations:
-                if "file" in location:
-                    file_path = os.path.join(repo_path, location["file"])
-                    if os.path.exists(file_path):
-                        try:
-                            with open(file_path, 'r') as f:
-                                lines = f.readlines()
-                                
-                            # Extract context around the line
-                            if "line" in location:
-                                line_num = location["line"]
-                                start_line = max(0, line_num - 3)
-                                end_line = min(len(lines), line_num + 3)
-                                
-                                location["context"] = "".join(lines[start_line:end_line])
-                        except Exception as e:
-                            logger.warning(f"Error reading file {file_path}: {e}")
-        
-        return {
-            "code_locations": code_locations,
-            "error_message": error_message,
-            "matching_logs": len(logs)
-        }
-            
-    except Exception as e:
-        logger.error(f"Error correlating with code: {e}")
-        return {"error": str(e)}
 
 
-@mcp.tool()
-async def stream_logs_realtime(
-    duration_seconds: int = 60,
-    filter_expression: Optional[str] = None,
-    ctx: Context = None
-) -> Dict:
-    """
-    Stream logs in real-time for monitoring.
-    
-    Args:
-        duration_seconds: Duration to stream logs for
-        filter_expression: Expression to filter logs (e.g. "level:error")
-        
-    Returns:
-        Dict containing the streamed logs
-    """
-    # Build query
-    query = {"match_all": {}}
-    
-    if filter_expression:
-        query = {
-            "query_string": {
-                "query": filter_expression
-            }
-        }
-    
-    # Set up streaming
-    max_logs = CONFIG["processing"]["max_logs"]
-    poll_interval = 2  # seconds
-    logs_collected = []
-    seen_log_ids = set()  # Track seen logs by ID to avoid duplicates
-    
-    # Get the current time to use as a reference point
-    now = datetime.datetime.now(datetime.timezone.utc)
-    start_time = now.isoformat()
-    
-    # Define timestamp fields to check for time-based filtering
-    timestamp_fields = ["@timestamp", "timestamp", "time", "start_time", "created_at"]
-    
-    ctx.info(f"Starting log stream for {duration_seconds} seconds...")
-    
-    # Calculate number of polls
-    num_polls = duration_seconds // poll_interval
-    
-    try:
-        for i in range(num_polls):
-            # Report progress
-            await ctx.report_progress(i, num_polls)
-            
-            try:
-                # Update query to only get logs since we started
-                time_should_clauses = []
-                for field in timestamp_fields:
-                    time_should_clauses.append({
-                        "range": {
-                            field: {
-                                "gte": start_time
-                            }
-                        }
-                    })
-                
-                # Combine with original query
-                time_query = {
-                    "bool": {
-                        "must": [query],
-                        "should": time_should_clauses,
-                        "minimum_should_match": 1
-                    }
-                }
-                
-                # Execute search
-                index_pattern = f"{es_config['index_prefix']}*"
-                result = await kibana_search(index_pattern, time_query, size=50)
-                
-                if "error" in result:
-                    logger.error(f"Error in poll {i}: {result['error']}")
-                    # Continue polling despite errors
-                    await asyncio.sleep(poll_interval)
-                    continue
-                
-                # Process results
-                if "hits" in result and "hits" in result["hits"]:
-                    new_logs = [doc["_source"] for doc in result["hits"]["hits"]]
-                    
-                    # Add to collected logs, avoiding duplicates
-                    for log in new_logs:
-                        # Create a unique ID for the log
-                        log_id = None
-                        
-                        # Try to use existing ID if available
-                        if "_id" in log:
-                            log_id = log["_id"]
-                        else:
-                            # Create hash from content
-                            log_content = json.dumps(log, sort_keys=True)
-                            log_id = hash(log_content)
-                        
-                        if log_id not in seen_log_ids:
-                            seen_log_ids.add(log_id)
-                            logs_collected.append(log)
-                            
-                            # Normalize timestamp field
-                            timestamp = None
-                            for field in timestamp_fields:
-                                if field in log:
-                                    timestamp = log[field]
-                                    break
-                            
-                            if timestamp:
-                                log["normalized_timestamp"] = timestamp
-                            
-                            # Limit the number of logs
-                            if len(logs_collected) >= max_logs:
-                                ctx.info(f"Reached maximum log limit of {max_logs}")
-                                break
-                
-                # Break if we've collected enough logs
-                if len(logs_collected) >= max_logs:
-                    break
-            except Exception as e:
-                logger.error(f"Error during poll {i}: {e}")
-                # Continue polling despite errors
-                
-            # Wait for next poll
-            await asyncio.sleep(poll_interval)
-            
-        return {
-            "logs": logs_collected,
-            "duration_seconds": duration_seconds,
-            "filter": filter_expression,
-            "log_count": len(logs_collected)
-        }
-            
-    except Exception as e:
-        logger.error(f"Error streaming logs: {e}")
-        # Return any logs collected so far along with the error
-        return {
-            "error": str(e),
-            "logs": logs_collected,
-            "duration_seconds": duration_seconds,
-            "filter": filter_expression,
-            "log_count": len(logs_collected)
-        }
+
+
 
 # === Helper Functions ===
 
-def extract_code_locations(log: Dict) -> List[Dict]:
-    """Extract code locations from a log entry."""
-    locations = []
-    
-    # Check for stack trace
-    if "error" in log and "stack_trace" in log["error"]:
-        stack_trace = log["error"]["stack_trace"]
-        locations.extend(extract_file_info_from_stack_trace(stack_trace))
-    elif "stack_trace" in log:
-        stack_trace = log["stack_trace"]
-        locations.extend(extract_file_info_from_stack_trace(stack_trace))
-        
-    # Check for context fields
-    if "context" in log:
-        context = log["context"]
-        if isinstance(context, dict):
-            if "file" in context:
-                file_path = context["file"]
-                line_num = context.get("line")
-                
-                locations.append({
-                    "file": file_path,
-                    "line": line_num
-                })
-    
-    return locations
 
-def extract_file_info_from_stack_trace(stack_trace: str) -> List[Dict]:
-    """Extract file information from a stack trace."""
-    locations = []
-    
-    if not stack_trace or not isinstance(stack_trace, str):
-        return locations
-        
-    # Split into lines
-    lines = stack_trace.split("\n")
-    
-    for line in lines:
-        info = extract_file_info_from_line(line)
-        if info:
-            locations.append(info)
-            
-    return locations
-
-def extract_file_info_from_line(line: str) -> Optional[Dict]:
-    """Extract file information from a stack trace line."""
-    if not line:
-        return None
-        
-    # Common patterns in stack traces
-    patterns = [
-        r'at\s+[\w$.]+\s+\((.+):(\d+):\d+\)',  # JavaScript/Node.js
-        r'at\s+(.+):(\d+):\d+',                # JavaScript/Node.js simplified
-        r'File "(.+)", line (\d+)',            # Python
-        r'at\s+[\w$.]+\((.+):(\d+)\)',         # Java/Kotlin
-        r'at\s+(.+):(\d+)',                    # Generic
-    ]
-    
-    import re
-    for pattern in patterns:
-        match = re.search(pattern, line)
-        if match:
-            return {
-                "file": match.group(1),
-                "line": int(match.group(2))
-            }
-            
-    return None
 
 # New MCP tool to set auth token
+@mcp.tool()
+async def summarize_logs(
+    query_text: Optional[str] = None,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+    levels: Optional[List[str]] = None,
+    include_fields: Optional[List[str]] = None,
+    exclude_fields: Optional[List[str]] = None,
+    max_results: int = 100,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = "desc",
+    ctx: Context = None
+) -> Dict:
+    """
+    Search logs and generate AI-powered analysis using Neurolink.
+    
+    This function accepts the same parameters as search_logs() and internally calls it
+    to fetch logs, then uses Neurolink to generate structured analysis including:
+    - Summary of log activities
+    - Key insights and patterns
+    - Errors and exceptions
+    - Function calls
+    - Timestamp-based flow
+    - Anomalies detection
+    - Focus points for developers
+    - Recommendations for next steps
+    
+    Args:
+        query_text: Text to search for in log messages
+        start_time: Start time for logs (ISO format or relative like '1h')
+        end_time: End time for logs (ISO format)
+        levels: List of log levels to include (e.g., ["error", "warn"])
+        include_fields: Fields to include in results
+        exclude_fields: Fields to exclude from results
+        max_results: Maximum number of results to return
+        sort_by: Field to sort results by (default: timestamp defined in config)
+        sort_order: Order to sort results ("asc" or "desc", default: "desc")
+        
+    Returns:
+        Dictionary with AI-generated analysis and original search metadata
+    """
+    try:
+        # Check if this is a function-based mode query by examining the query_text
+        is_function_based = False
+        if query_text and ("FunctionCallResult" in query_text or "FunctionCalled" in query_text):
+            is_function_based = True
+            logger.info(f"Detected function-based mode query: {query_text}")
+            
+            # For function-based mode, we should always sort by timestamp in ascending order
+            if not sort_by:
+                sort_by = "timestamp"
+            if not sort_order or sort_order.lower() != "asc":
+                sort_order = "asc"
+                logger.info("Function-based mode: Setting sort_order to 'asc'")
+
+        # First, call search_logs to get the log data
+        logger.info(f"Fetching logs for summarization with max_results={max_results}")
+        search_result = await search_logs(
+            query_text=query_text,
+            start_time=start_time,
+            end_time=end_time,
+            levels=levels,
+            include_fields=include_fields,
+            exclude_fields=exclude_fields,
+            max_results=max_results,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            ctx=ctx
+        )
+        
+        # Check if search was successful
+        if not search_result.get("success", False):
+            return {
+                "success": False,
+                "error": f"Failed to fetch logs: {search_result.get('error', 'Unknown error')}",
+                "analysis": {
+                    "summary": f"Error: {search_result.get('error', 'Unknown error')}",
+                    "key_insights": [],
+                    "errors": [],
+                    "function_calls": [],
+                    "timestamp_flow": "",
+                    "anomalies": [],
+                    "focus_areas": [],
+                    "recommendations": []
+                },
+                "search_metadata": search_result
+            }
+        
+        logs = search_result.get("logs", [])
+        if not logs:
+            return {
+                "success": True,
+                "analysis": {
+                    "summary": "No logs found matching the search criteria.",
+                    "key_insights": [],
+                    "errors": [],
+                    "function_calls": [],
+                    "timestamp_flow": "No logs to analyze",
+                    "anomalies": [],
+                    "focus_areas": [],
+                    "recommendations": []
+                },
+                "search_metadata": {
+                    "total_logs": 0,
+                    "query": search_result.get("query"),
+                    "indices_searched": search_result.get("indices_searched"),
+                    "sort_by": search_result.get("sort_by"),
+                    "sort_order": sort_order
+                }
+            }
+        
+        logger.info(f"Processing {len(logs)} logs for AI analysis")
+        
+        # Generate AI analysis using Neurolink
+        analysis = await _generate_log_analysis_with_neurolink(logs, is_function_based)
+        
+        return {
+            "success": True,
+            "analysis": analysis,
+            "search_metadata": {
+                "total_logs": len(logs),
+                "query": search_result.get("query"),
+                "indices_searched": search_result.get("indices_searched"),
+                "sort_by": search_result.get("sort_by"),
+                "sort_order": sort_order,
+                "is_function_based": is_function_based
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in summarize_logs: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        return {
+            "success": False,
+            "error": str(e),
+            "analysis": {
+                "summary": f"Error occurred during analysis: {str(e)}",
+                "key_insights": [],
+                "errors": [],
+                "function_calls": [],
+                "timestamp_flow": "",
+                "anomalies": [],
+                "focus_areas": [],
+                "recommendations": []
+            },
+            "search_metadata": None
+        }
+
+async def _generate_log_analysis_with_neurolink(logs: List[Dict], is_function_based: bool = False) -> Dict:
+    """
+    Generate AI-powered log analysis using Neurolink.
+    
+    Args:
+        logs: List of log entries to analyze
+        is_function_based: Whether this is a function-based mode analysis
+        
+    Returns:
+        Dictionary containing structured analysis
+    """
+    import subprocess
+    import json
+    import tempfile
+    import os
+    
+    # Base prompt template for Neurolink
+    BASE_PROMPT_TEMPLATE = """
+You are a senior system engineer and log analysis expert. The following data consists of raw backend logs generated during the execution of various services and operations in a production environment. These logs may contain function calls, status updates, error traces, and system-level metadata.
+
+Your task is to deeply analyze the provided log chunk and generate a structured, HIGHLY DETAILED and comprehensive summary with absolutely no loss of technical detail. Be precise, thorough, and exhaustive in your analysis. Do not summarize or condense information - provide complete details for each section.
+
+Given the following logs:
+
+{LOGS_CHUNK}
+
+Generate an extremely detailed analysis with the following sections:
+
+1. Summary
+   Provide a comprehensive overview of what these logs represent. Mention which services or systems are involved, describe the general activity captured in this chunk, and include all relevant technical details about the environment, versions, and components involved.
+
+2. Key Insights
+   Extract ALL important insights or recurring themes. Include detailed descriptions of system behaviors, unexpected events, patterns, retry mechanisms, performance delays, or configuration mismatches. Provide specific examples from the logs for each insight.
+
+3. Errors and Exceptions
+   List ALL errors, exceptions, or stack traces encountered in the logs. Include complete message snippets, error codes, affected modules or functions, and potential root causes. Group related errors together and explain their relationships.
+
+4. Function Calls
+   Identify ALL functions or methods invoked throughout the logs. Provide a comprehensive list organized by service/component. Mention frequently recurring calls with their parameters and return values, and highlight those that seem critical or error-prone. Show the relationships between function calls.
+
+5. Timestamp-Based Flow
+   Reconstruct the detailed chronological flow of the logs. Provide a step-by-step timeline of how the system events unfolded in order, using available timestamps to show progression or delays. Include specific timestamps and durations between key events.
+
+6. Anomalies
+   Highlight ALL anomalies, inconsistencies, time gaps, suspicious behavior, or abnormal responses in the logs. For each anomaly, provide specific evidence from the logs, potential causes, and severity assessment.
+
+7. Important Focus Areas
+   List ALL areas that need developer attention, such as failing services, slow processes, missing data, degraded performance, or broken workflows. For each area, provide detailed evidence from the logs and explain why it requires attention.
+
+8. Recommendations
+   Based on your analysis, suggest comprehensive next steps, fixes, or areas for further investigation. Provide specific, actionable recommendations for each issue identified, with technical details on how to implement them.
+
+The output must be extremely detailed, well-structured and technically sound. DO NOT provide generic or brief summaries. Include ALL relevant technical details, patterns, and insights from the logs. Focus on helping a backend engineer understand system behavior and quickly locate problems.
+
+Please respond with a valid JSON object containing the extremely detailed analysis in the following format:
+{
+  "summary": "...",
+  "key_insights": ["...", "..."],
+  "errors": ["...", "..."],
+  "function_calls": ["...", "..."],
+  "timestamp_flow": "...",
+  "anomalies": ["...", "..."],
+  "focus_areas": ["...", "..."],
+  "recommendations": ["...", "..."]
+}
+"""
+
+    # Enhanced function-based prompt template
+    FUNCTION_BASED_PROMPT_TEMPLATE = """
+You are a senior system engineer and log analysis expert specializing in function call tracing and execution flow analysis. The following data consists of backend logs focused on function calls and their results during the execution of various services and operations in a production environment.
+
+Your task is to deeply analyze the provided log chunk and generate a structured, HIGHLY DETAILED and comprehensive summary with absolutely no loss of technical detail. Be precise, thorough, and exhaustive in your analysis. Do not summarize or condense information - provide complete details for each section.
+
+Given the following logs:
+
+{LOGS_CHUNK}
+
+Generate an extremely detailed analysis with the following sections:
+
+1. Summary
+   Provide a comprehensive overview of what these logs represent. Mention which services or systems are involved, describe the general activity captured in this chunk, and include all relevant technical details about the environment, versions, and components involved.
+
+2. Key Insights
+   Extract ALL important insights about function execution patterns, data flows, state transitions, and system behaviors. Include detailed descriptions of notable sequences, parameter patterns, and critical function chains. Provide specific examples from the logs for each insight.
+
+3. Errors and Exceptions
+   List ALL errors, exceptions, or failures encountered in function calls. Include complete error messages, error codes, affected functions, and potential root causes. Group related errors together and explain their relationships.
+
+4. Function Calls
+   Create a comprehensive list of ALL functions called, organized by service/module. For each function, include parameters, return values, and execution context. Highlight the most critical functions in the execution flow and their relationships. Show the complete call hierarchy where possible.
+
+5. Timestamp-Based Flow
+   Reconstruct the detailed chronological execution flow of functions. Provide a step-by-step timeline showing the sequence of calls, their timing, and any notable delays or gaps between related calls. Include specific timestamps and durations between key events.
+
+6. Anomalies
+   Identify ALL anomalies in function execution, such as unexpected parameter values, missing expected calls, unusual sequences, or abnormal return values. For each anomaly, provide specific evidence from the logs, potential causes, and severity assessment.
+
+7. Important Focus Areas
+   List ALL specific functions or code areas that need developer attention, such as error-prone functions, performance bottlenecks, or potential logic issues. For each area, provide detailed evidence from the logs and explain why it requires attention.
+
+8. Recommendations
+   Based on your analysis of the function execution flow, suggest comprehensive and specific improvements, optimizations, or fixes for the identified issues. Provide detailed, actionable recommendations for each issue, with technical details on how to implement them.
+
+The output must be extremely detailed, well-structured and technically sound. DO NOT provide generic or brief summaries. Include ALL relevant technical details, patterns, and insights from the logs. Focus on helping a backend engineer understand the execution flow and quickly identify issues in the function call chain.
+
+Please respond with a valid JSON object containing the extremely detailed analysis in the following format:
+{
+  "summary": "...",
+  "key_insights": ["...", "..."],
+  "errors": ["...", "..."],
+  "function_calls": ["...", "..."],
+  "timestamp_flow": "...",
+  "anomalies": ["...", "..."],
+  "focus_areas": ["...", "..."],
+  "recommendations": ["...", "..."]
+}
+"""
+    
+    try:
+        # Select the appropriate prompt template based on the mode
+        PROMPT_TEMPLATE = FUNCTION_BASED_PROMPT_TEMPLATE if is_function_based else BASE_PROMPT_TEMPLATE
+        
+        # Check if we have many logs - if so, chunk them
+        if len(logs) > 25:
+            logger.info(f"Chunking {len(logs)} logs into smaller pieces for analysis")
+            chunk_size = max(1, len(logs) // 4)  # Split into 4 chunks
+            chunks = [logs[i:i + chunk_size] for i in range(0, len(logs), chunk_size)]
+            
+            # Analyze each chunk
+            chunk_analyses = []
+            for i, chunk in enumerate(chunks):
+                logger.info(f"Analyzing chunk {i+1}/{len(chunks)} with {len(chunk)} logs")
+                chunk_analysis = await _analyze_log_chunk_with_neurolink(chunk, PROMPT_TEMPLATE)
+                if chunk_analysis:
+                    chunk_analyses.append(chunk_analysis)
+            
+            # If we have multiple chunk analyses, combine them
+            if len(chunk_analyses) > 1:
+                logger.info("Combining chunk analyses into final summary")
+                return await _combine_analyses_with_neurolink(chunk_analyses, PROMPT_TEMPLATE, is_function_based)
+            elif len(chunk_analyses) == 1:
+                return chunk_analyses[0]
+            else:
+                # Fallback if all chunks failed
+                return _generate_fallback_analysis(logs, is_function_based)
+        else:
+            # Analyze all logs at once
+            logger.info(f"Analyzing all {len(logs)} logs in single request")
+            analysis = await _analyze_log_chunk_with_neurolink(logs, PROMPT_TEMPLATE)
+            return analysis if analysis else _generate_fallback_analysis(logs, is_function_based)
+            
+    except Exception as e:
+        logger.error(f"Error in _generate_log_analysis_with_neurolink: {str(e)}")
+        return _generate_fallback_analysis(logs, is_function_based)
+
+async def _analyze_log_chunk_with_neurolink(logs: List[Dict], prompt_template: str) -> Optional[Dict]:
+    """
+    Analyze a chunk of logs using Neurolink.
+    
+    Args:
+        logs: List of log entries
+        prompt_template: Template with {LOGS_CHUNK} placeholder
+        
+    Returns:
+        Analysis dictionary or None if failed
+    """
+    import subprocess
+    import json
+    import tempfile
+    import os
+    import asyncio
+    
+    try:
+        logger.info(f"Starting _analyze_log_chunk_with_neurolink with {len(logs)} logs")
+        
+        # Format logs as text
+        logs_text = ""
+        for i, log in enumerate(logs):
+            logs_text += f"--- Log Entry {i+1} ---\n"
+            try:
+                logs_text += json.dumps(log, indent=2, default=str)
+            except Exception as e:
+                logger.error(f"Error serializing log entry {i+1}: {e}")
+                logs_text += f"Error serializing log: {str(e)}"
+            logs_text += "\n\n"
+        
+        logger.info(f"Formatted logs text length: {len(logs_text)}")
+        
+        # Create the prompt
+        try:
+            # Use simple string replacement instead of .format() to avoid issues with JSON content
+            prompt = prompt_template.replace("{LOGS_CHUNK}", logs_text)
+            logger.info(f"Created prompt, length: {len(prompt)}")
+        except Exception as e:
+            logger.error(f"Error formatting prompt: {e}")
+            logger.error(f"Logs text sample: {logs_text[:500]}")
+            return None
+        
+        # Set up environment for Neurolink
+        # Start with a copy of the current environment
+        env = os.environ.copy()
+        
+        # Load AI provider keys from config.yaml and override environment variables
+        # CONFIG is globally available and loaded from config.yaml
+        ai_provider_keys_from_config = CONFIG.get("ai_providers", {})
+        logger.info(f"Config ai_providers section: {ai_provider_keys_from_config}")
+        if ai_provider_keys_from_config:
+            logger.info(f"Loading AI provider API keys from config.yaml: {list(ai_provider_keys_from_config.keys())}")
+            for key, value in ai_provider_keys_from_config.items():
+                logger.info(f"Processing config key: {key} = {value[:10] if value else 'empty'}...")
+                if value:  # Only set if the key has a value in config
+                    env[key.upper()] = str(value) # Ensure keys are uppercase and values are strings
+                    logger.info(f"Set {key.upper()} from config.yaml for Neurolink subprocess")
+                elif key.upper() in env:
+                    # If the key is empty in config but exists in os.environ, keep the os.environ one
+                    logger.debug(f"Kept {key.upper()} from os.environ as it was empty in config.yaml")
+        else:
+            logger.warning("No ai_providers section found in config.yaml")
+        
+        # Check for Google AI API key (recommended provider)
+        # This check is now after config.yaml keys have been potentially set
+        logger.info(f"Environment variables check - GOOGLE_AI_API_KEY exists: {'GOOGLE_AI_API_KEY' in env}")
+        if "GOOGLE_AI_API_KEY" in env:
+            logger.info(f"GOOGLE_AI_API_KEY value: {env['GOOGLE_AI_API_KEY'][:10]}...")
+        
+        if "GOOGLE_AI_API_KEY" not in env or not env["GOOGLE_AI_API_KEY"]:
+            logger.warning("GOOGLE_AI_API_KEY not found in environment or config.yaml. Neurolink may use a different provider or fallback.")
+            # Try to find any available API keys
+            available_keys = [k for k, v in env.items() if k.endswith('_API_KEY') and v]
+            if available_keys:
+                logger.info(f"Available API keys for Neurolink: {available_keys}")
+            else:
+                logger.error("No AI provider API keys found. Neurolink will likely fail.")
+                return None
+        else:
+            logger.info("GOOGLE_AI_API_KEY is configured for Neurolink.")
+            logger.debug(f"GOOGLE_AI_API_KEY starts with: {env['GOOGLE_AI_API_KEY'][:8]}...")
+
+        # Create temp file for the prompt
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+            f.write(prompt)
+            prompt_file = f.name
+        
+        try:
+            # Read the prompt from the temp file since Neurolink expects prompt as positional argument
+            with open(prompt_file, 'r') as f:
+                prompt_content = f.read()
+            
+            # Get AI response settings from config
+            ai_settings = CONFIG.get("ai_response_settings", {})
+            max_tokens = ai_settings.get("max_tokens", 8000000)
+            timeout_ms = ai_settings.get("timeout_ms", 600000)
+            temperature = ai_settings.get("temperature", 0.2)
+            detailed_mode = ai_settings.get("detailed_mode", True)
+            
+            # Run Neurolink with Google AI Studio as the preferred provider
+            cmd = [
+                "npx", "@juspay/neurolink", "generate-text", 
+                prompt_content,  # Prompt as positional argument
+                "--provider", "google-ai",
+                "--max-tokens", str(max_tokens),  # Use value from config
+                "--timeout", str(timeout_ms),  # Use value from config
+                "--temperature", str(temperature),  # Use value from config
+            ]
+            
+            # Add detailed mode flag if enabled
+            if detailed_mode:
+                cmd.extend(["--detailed-mode", "true"])
+            
+            logger.info(f"Running Neurolink command: {' '.join(cmd[:3])}... (prompt truncated)")
+            logger.info(f"Command environment has GOOGLE_AI_API_KEY: {'GOOGLE_AI_API_KEY' in env}")
+            logger.info(f"Using AI settings: max_tokens={max_tokens}, timeout={timeout_ms}ms, temperature={temperature}, detailed_mode={detailed_mode}")
+            
+            # Run the command asynchronously
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env
+                )
+                
+                # Convert timeout from ms to seconds for asyncio
+                timeout_seconds = timeout_ms / 1000
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)  # Use timeout from config
+                
+                logger.info(f"Neurolink process completed with return code: {process.returncode}")
+                if stderr:
+                    logger.info(f"Neurolink stderr: {stderr.decode()}")
+                
+                if process.returncode != 0:
+                    logger.error(f"Neurolink command failed with return code {process.returncode}")
+                    logger.error(f"stderr: {stderr.decode()}")
+                    return None
+            except Exception as e:
+                logger.error(f"Error running Neurolink subprocess: {str(e)}")
+                return None
+            
+            # Parse the response
+            response_text = stdout.decode().strip()
+            # Log more of the response for debugging
+            logger.info(f"Neurolink raw response (first 1000 chars): {response_text[:1000]}")
+            logger.info(f"Neurolink raw response (last 500 chars): {response_text[-500:]}")
+            
+            # Neurolink returns responses in markdown format with ```json code blocks
+            # Extract JSON from markdown code blocks first
+            if '```json' in response_text:
+                start_marker = '```json'
+                end_marker = '```'
+                start_idx = response_text.find(start_marker) + len(start_marker)
+                end_idx = response_text.find(end_marker, start_idx)
+                if start_idx != -1 and end_idx != -1:
+                    json_str = response_text[start_idx:end_idx].strip()
+                    try:
+                        analysis = json.loads(json_str)
+                        logger.info(f"Successfully parsed JSON from markdown: {json_str[:200]}...")
+                        # Log the size of each section for debugging
+                        for key, value in analysis.items():
+                            if isinstance(value, str):
+                                logger.info(f"Section '{key}' length: {len(value)} chars")
+                            elif isinstance(value, list):
+                                logger.info(f"Section '{key}' items: {len(value)}, total chars: {sum(len(str(item)) for item in value)}")
+                        return analysis
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Failed to parse JSON from markdown: {e}")
+                        logger.error(f"Problematic JSON string: {json_str[:200]}...")
+            
+            # Try to extract JSON from the response (fallback)
+            try:
+                # First, try to parse the entire response as JSON (if it's pure JSON)
+                neurolink_response = json.loads(response_text)
+                logger.debug(f"Successfully parsed entire response as JSON")
+                return neurolink_response
+                    
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse entire response as JSON: {e}")
+                # Try to find JSON in the raw response
+                start_idx = response_text.find('{')
+                end_idx = response_text.rfind('}') + 1
+                if start_idx != -1 and end_idx != -1:
+                    try:
+                        json_str = response_text[start_idx:end_idx]
+                        analysis = json.loads(json_str)
+                        logger.info(f"Successfully extracted JSON from response: {json_str[:200]}...")
+                        # Log the size of each section for debugging
+                        for key, value in analysis.items():
+                            if isinstance(value, str):
+                                logger.info(f"Section '{key}' length: {len(value)} chars")
+                            elif isinstance(value, list):
+                                logger.info(f"Section '{key}' items: {len(value)}, total chars: {sum(len(str(item)) for item in value)}")
+                        return analysis
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Failed to parse extracted JSON: {e}")
+                        logger.error(f"Problematic JSON string: {json_str[:200]}...")
+                
+                # If all JSON parsing fails, parse as text
+                logger.info("No valid JSON found, parsing as text")
+                return _parse_text_response_to_analysis(response_text)
+                
+        finally:
+            # Clean up temp file
+            try:
+                os.unlink(prompt_file)
+            except:
+                pass
+                
+    except asyncio.TimeoutError:
+        logger.error(f"Neurolink request timed out after {timeout_seconds} seconds")
+        return None
+    except Exception as e:
+        logger.error(f"Error calling Neurolink: {str(e)}")
+        return None
+
+async def _combine_analyses_with_neurolink(analyses: List[Dict], prompt_template: str, is_function_based: bool = False) -> Dict:
+    """
+    Combine multiple chunk analyses into a final summary using Neurolink.
+    
+    Args:
+        analyses: List of analysis dictionaries from chunks
+        prompt_template: Template for the prompt
+        is_function_based: Whether this is a function-based mode analysis
+        
+    Returns:
+        Combined analysis dictionary
+    """
+    try:
+        # Format the analyses as text for combination
+        combined_text = "=== CHUNK ANALYSES TO COMBINE ===\n\n"
+        for i, analysis in enumerate(analyses):
+            combined_text += f"--- Analysis {i+1} ---\n"
+            combined_text += json.dumps(analysis, indent=2)
+            combined_text += "\n\n"
+        
+        # Use the same prompt template but with the analyses as input
+        modified_prompt = prompt_template.replace(
+            "Given the following logs:",
+            "Given the following pre-analyzed log summaries from different chunks:"
+        )
+        
+        if is_function_based:
+            modified_prompt = modified_prompt.replace(
+                "backend logs focused on function calls and their results",
+                "pre-analyzed summaries of function call logs from different time periods or chunks"
+            )
+        else:
+            modified_prompt = modified_prompt.replace(
+                "raw backend logs generated during the execution",
+                "pre-analyzed summaries of backend logs from different time periods or chunks"
+            )
+        
+        # Add special instructions for combining analyses
+        modified_prompt = modified_prompt.replace(
+            "Generate a detailed analysis with the following sections:",
+            "Generate a comprehensive combined analysis with the following sections. Focus on creating a cohesive narrative across all chunks, highlighting patterns, progressions, and relationships:"
+        )
+        
+        # Analyze the combined analyses
+        result = await _analyze_log_chunk_with_neurolink([{"combined_analyses": combined_text}], modified_prompt)
+        return result if result else _generate_fallback_combined_analysis(analyses, is_function_based)
+        
+    except Exception as e:
+        logger.error(f"Error combining analyses: {str(e)}")
+        return _generate_fallback_combined_analysis(analyses, is_function_based)
+
+def _parse_text_response_to_analysis(response_text: str) -> Dict:
+    """
+    Parse a text response into structured analysis format.
+    
+    Args:
+        response_text: Raw text response from Neurolink
+        
+    Returns:
+        Structured analysis dictionary
+    """
+    # Initialize default structure with empty values
+    analysis = {
+        "summary": "",
+        "key_insights": [],
+        "errors": [],
+        "function_calls": [],
+        "timestamp_flow": "",
+        "anomalies": [],
+        "focus_areas": [],
+        "recommendations": []
+    }
+    
+    try:
+        # First try to extract JSON from the response
+        import json
+        import re
+        
+        # Look for JSON objects in the text
+        json_pattern = r'(\{[\s\S]*\})'
+        json_matches = re.findall(json_pattern, response_text)
+        
+        for potential_json in json_matches:
+            try:
+                parsed_json = json.loads(potential_json)
+                if isinstance(parsed_json, dict):
+                    # Check if this looks like our expected format
+                    if any(key in parsed_json for key in analysis.keys()):
+                        logger.info("Found valid JSON structure in response")
+                        
+                        # Copy over the values from the parsed JSON
+                        for key in analysis.keys():
+                            if key in parsed_json and parsed_json[key]:
+                                analysis[key] = parsed_json[key]
+                        
+                        # If we found a valid analysis JSON, return it
+                        return analysis
+            except json.JSONDecodeError:
+                continue
+        
+        # If no valid JSON was found, fall back to text parsing
+        logger.info("No valid JSON found, parsing as text")
+        
+        # Simple parsing - look for sections in the text
+        lines = response_text.split('\n')
+        current_section = None
+        current_content = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Check for section headers - more robust pattern matching
+            if re.search(r'(^|\s)1\.(\s|$)|summary', line.lower()):
+                if current_section and current_content:
+                    _add_content_to_analysis(analysis, current_section, current_content)
+                current_section = 'summary'
+                current_content = []
+                # Extract content after the header if it exists
+                if ':' in line:
+                    current_content.append(line.split(':', 1)[1].strip())
+            elif re.search(r'(^|\s)2\.(\s|$)|key insights', line.lower()):
+                if current_section and current_content:
+                    _add_content_to_analysis(analysis, current_section, current_content)
+                current_section = 'key_insights'
+                current_content = []
+            elif re.search(r'(^|\s)3\.(\s|$)|errors|exceptions', line.lower()):
+                if current_section and current_content:
+                    _add_content_to_analysis(analysis, current_section, current_content)
+                current_section = 'errors'
+                current_content = []
+            elif re.search(r'(^|\s)4\.(\s|$)|function calls', line.lower()):
+                if current_section and current_content:
+                    _add_content_to_analysis(analysis, current_section, current_content)
+                current_section = 'function_calls'
+                current_content = []
+            elif re.search(r'(^|\s)5\.(\s|$)|timestamp|flow', line.lower()):
+                if current_section and current_content:
+                    _add_content_to_analysis(analysis, current_section, current_content)
+                current_section = 'timestamp_flow'
+                current_content = []
+            elif re.search(r'(^|\s)6\.(\s|$)|anomalies', line.lower()):
+                if current_section and current_content:
+                    _add_content_to_analysis(analysis, current_section, current_content)
+                current_section = 'anomalies'
+                current_content = []
+            elif re.search(r'(^|\s)7\.(\s|$)|focus areas|important', line.lower()):
+                if current_section and current_content:
+                    _add_content_to_analysis(analysis, current_section, current_content)
+                current_section = 'focus_areas'
+                current_content = []
+            elif re.search(r'(^|\s)8\.(\s|$)|recommendations', line.lower()):
+                if current_section and current_content:
+                    _add_content_to_analysis(analysis, current_section, current_content)
+                current_section = 'recommendations'
+                current_content = []
+            elif line.startswith('-') or line.startswith('*') or re.match(r'^\d+\.', line):
+                # This is a list item, add it to the current section
+                if current_section:
+                    # Remove the bullet point or number and add the content
+                    cleaned = re.sub(r'^[-*]\s*|^\d+\.\s*', '', line).strip()
+                    if cleaned:
+                        current_content.append(cleaned)
+            else:
+                # Regular content line
+                if current_section:
+                    current_content.append(line)
+        
+        # Add the last section
+        if current_section and current_content:
+            _add_content_to_analysis(analysis, current_section, current_content)
+        
+        # If no structured content was found, put everything in summary
+        if not any(v for v in analysis.values() if v):
+            analysis['summary'] = response_text
+            
+    except Exception as e:
+        logger.error(f"Error parsing text response: {str(e)}")
+        analysis['summary'] = response_text
+    
+    # Ensure all sections have at least default values
+    if not analysis['summary']:
+        analysis['summary'] = "No summary available from analysis"
+    
+    # Return the analysis with all sections guaranteed to be present
+    return analysis
+
+def _add_content_to_analysis(analysis: Dict, section: str, content: List[str]):
+    """Helper function to add parsed content to analysis structure."""
+    content_text = ' '.join(content).strip()
+    if not content_text:
+        return
+        
+    if section in ['summary', 'timestamp_flow']:
+        analysis[section] = content_text
+    elif section in ['key_insights', 'errors', 'function_calls', 'anomalies', 'focus_areas', 'recommendations']:
+        # Split content into list items if it contains bullet points or numbered items
+        items = []
+        for line in content:
+            if line.strip():
+                # Remove bullet points and numbers
+                cleaned = line.strip().lstrip('•-*').lstrip('0123456789.').strip()
+                if cleaned:
+                    items.append(cleaned)
+        analysis[section] = items if items else [content_text]
+
+def _generate_fallback_analysis(logs: List[Dict], is_function_based: bool = False) -> Dict:
+    """
+    Generate a basic analysis when Neurolink is not available.
+    
+    Args:
+        logs: List of log entries
+        is_function_based: Whether this is a function-based mode analysis
+        
+    Returns:
+        Basic analysis dictionary
+    """
+    try:
+        # Basic analysis without AI
+        error_count = 0
+        warn_count = 0
+        info_count = 0
+        functions = set()
+        errors = []
+        timestamps = []
+        
+        # Extract function calls and other information from logs
+        for log in logs:
+            # Get level and count errors/warnings
+            level = str(log.get('level', '')).lower()
+            if 'error' in level:
+                error_count += 1
+                message = str(log.get('message', log.get('msg', '')))
+                if message:
+                    errors.append(message[:200])  # Truncate long messages
+            elif 'warn' in level:
+                warn_count += 1
+            elif 'info' in level:
+                info_count += 1
+            
+            # Extract function names from messages
+            message = str(log.get('message', log.get('msg', '')))
+            
+            # Track timestamps for flow analysis
+            timestamp = log.get('@timestamp', log.get('timestamp', None))
+            if timestamp:
+                timestamps.append(timestamp)
+            
+            # More aggressive function name extraction for function-based mode
+            import re
+            
+            if is_function_based:
+                # Look for "FunctionCalled" or "FunctionCallResult" patterns
+                if "FunctionCalled" in message or "FunctionCallResult" in message:
+                    # Extract function name - common patterns in logs
+                    func_patterns = [
+                        r'FunctionCalled:\s*(\w+)',
+                        r'FunctionCallResult:\s*(\w+)',
+                        r'Function\s+(\w+)\s+called',
+                        r'Calling\s+function\s+(\w+)',
+                        r'(\w+)\(\)',
+                        r'(\w+)\(.*\)',
+                        r'method\s+(\w+)',
+                        r'service\.(\w+)',
+                    ]
+                    
+                    for pattern in func_patterns:
+                        matches = re.findall(pattern, message)
+                        if matches:
+                            functions.update(matches)
+                            break
+            else:
+                # Standard function extraction for regular mode
+                func_matches = re.findall(r'(\w+)\(', message)
+                functions.update(func_matches)
+                
+                # Also look for common function call patterns
+                service_method_matches = re.findall(r'(\w+)\.(\w+)', message)
+                for match in service_method_matches:
+                    if len(match[1]) > 2:  # Avoid short property accesses
+                        functions.add(f"{match[0]}.{match[1]}")
+        
+        # Sort timestamps and create a basic flow
+        timestamp_flow = "No timestamp information available"
+        if timestamps:
+            try:
+                timestamps.sort()
+                first_time = timestamps[0]
+                last_time = timestamps[-1]
+                timestamp_flow = f"Logs span from {first_time} to {last_time}"
+            except:
+                pass
+        
+        # Create appropriate summary based on mode
+        if is_function_based:
+            summary = f"Analyzed {len(logs)} log entries in function-based mode. Found {len(functions)} unique function calls, {error_count} errors, and {warn_count} warnings."
+            
+            # More detailed insights for function-based mode
+            key_insights = [
+                f"Total log entries: {len(logs)}",
+                f"Unique functions identified: {len(functions)}",
+                f"Error rate: {error_count/len(logs)*100:.1f}%" if logs else "No logs to analyze"
+            ]
+            
+            # Add function call frequency if we have enough data
+            if len(functions) > 0:
+                key_insights.append(f"Most frequent functions: {', '.join(list(functions)[:5])}")
+            
+            # Focus areas for function-based mode
+            focus_areas = []
+            if error_count > 0:
+                focus_areas.append(f"Functions with errors need investigation ({error_count} errors found)")
+            if len(functions) < 3 and len(logs) > 10:
+                focus_areas.append("Limited function visibility despite log volume")
+            
+            return {
+                "summary": summary,
+                "key_insights": key_insights,
+                "errors": errors[:10],  # Limit to 10 errors
+                "function_calls": list(functions),
+                "timestamp_flow": timestamp_flow,
+                "anomalies": [
+                    "Function-based analysis requires AI processing for anomaly detection",
+                    "Consider enabling AI provider for better insights"
+                ],
+                "focus_areas": focus_areas,
+                "recommendations": [
+                    "Configure an AI provider API key for detailed function flow analysis",
+                    "Use sort_by=timestamp and sort_order=asc for optimal function flow visualization",
+                    "Increase max_results for more complete function chain visibility"
+                ]
+            }
+        else:
+            # Standard fallback analysis
+            return {
+                "summary": f"Analyzed {len(logs)} log entries. Found {error_count} errors, {warn_count} warnings, and {info_count} info messages.",
+                "key_insights": [
+                    f"Total log entries: {len(logs)}",
+                    f"Error rate: {error_count/len(logs)*100:.1f}%" if logs else "No logs to analyze"
+                ],
+                "errors": errors[:10],  # Limit to 10 errors
+                "function_calls": list(functions)[:20],  # Limit to 20 functions
+                "timestamp_flow": timestamp_flow,
+                "anomalies": [],
+                "focus_areas": ["High error rate needs investigation"] if error_count > len(logs) * 0.1 else [],
+                "recommendations": ["Configure an AI provider API key for deeper insights"]
+            }
+    except Exception as e:
+        logger.error(f"Error in fallback analysis: {str(e)}")
+        return {
+            "summary": f"Basic analysis of {len(logs)} logs completed with limited insights",
+            "key_insights": ["Fallback analysis due to processing error"],
+            "errors": [],
+            "function_calls": [],
+            "timestamp_flow": "Not available",
+            "anomalies": [],
+            "focus_areas": [],
+            "recommendations": ["Check system configuration"]
+        }
+
+def _generate_fallback_combined_analysis(analyses: List[Dict], is_function_based: bool = False) -> Dict:
+    """
+    Generate a combined analysis when Neurolink combination fails.
+    
+    Args:
+        analyses: List of analysis dictionaries
+        is_function_based: Whether this is a function-based mode analysis
+        
+    Returns:
+        Combined analysis dictionary
+    """
+    try:
+        combined = {
+            "summary": "",
+            "key_insights": [],
+            "errors": [],
+            "function_calls": [],
+            "timestamp_flow": "",
+            "anomalies": [],
+            "focus_areas": [],
+            "recommendations": []
+        }
+        
+        # Combine all sections
+        summaries = []
+        for analysis in analyses:
+            if analysis.get('summary'):
+                summaries.append(analysis['summary'])
+            
+            # Combine list sections
+            for key in ['key_insights', 'errors', 'function_calls', 'anomalies', 'focus_areas', 'recommendations']:
+                if key in analysis and isinstance(analysis[key], list):
+                    combined[key].extend(analysis[key])
+            
+            # For timestamp flow, we'll concatenate with separators
+            if analysis.get('timestamp_flow'):
+                if combined['timestamp_flow']:
+                    combined['timestamp_flow'] += " → " + analysis['timestamp_flow']
+                else:
+                    combined['timestamp_flow'] = analysis['timestamp_flow']
+        
+        # Create a comprehensive summary
+        if summaries:
+            combined['summary'] = " ".join(summaries)
+        else:
+            combined['summary'] = f"Combined analysis of {len(analyses)} chunks"
+        
+        # If timestamp flow wasn't populated, set a default
+        if not combined['timestamp_flow']:
+            combined['timestamp_flow'] = "Combined analysis from multiple chunks"
+        
+        # Remove duplicates from lists while preserving order
+        for key in ['key_insights', 'errors', 'function_calls', 'anomalies', 'focus_areas', 'recommendations']:
+            if combined[key]:
+                # Use dict.fromkeys to preserve order while removing duplicates
+                combined[key] = list(dict.fromkeys(combined[key]))
+        
+        # Add a special insight for function-based mode
+        if is_function_based:
+            combined['key_insights'].insert(0, f"Function-based analysis combined from {len(analyses)} chunks")
+            
+            # Add recommendations specific to function-based mode
+            if "Configure an AI provider API key for detailed function flow analysis" not in combined['recommendations']:
+                combined['recommendations'].append("Configure an AI provider API key for detailed function flow analysis")
+        
+        return combined
+        
+    except Exception as e:
+        logger.error(f"Error in fallback combined analysis: {str(e)}")
+        return {
+            "summary": f"Combined analysis of {len(analyses)} chunks with limited processing",
+            "key_insights": ["Fallback combination due to processing error"],
+            "errors": [],
+            "function_calls": [],
+            "timestamp_flow": "Not available",
+            "anomalies": [],
+            "focus_areas": [],
+            "recommendations": ["Check system configuration for AI analysis"]
+        }
+
 @mcp.tool()
 async def set_auth_token(auth_token: str, ctx: Context = None) -> Dict:
     """
@@ -1144,6 +1829,328 @@ async def set_auth_token(auth_token: str, ctx: Context = None) -> Dict:
         return {
             "success": False,
             "message": f"Error: {str(e)}"
+        }
+
+@mcp.tool()
+async def extract_session_id(
+    order_id: str,
+    ctx: Context = None
+) -> Dict:
+    """
+    Extract session IDs from logs related to a specific order ID by parsing the log message.
+    
+    This function searches for logs containing the order ID and "callStartPayment",
+    then parses the 'message' field of these logs to extract the session ID
+    based on the pattern: "{num} | {some_id} | {session_id} | ..."
+    The session ID is the third segment after splitting by " | ".
+    
+    Args:
+        order_id: The order ID to search for in logs
+        
+    Returns:
+        Dictionary with extracted session IDs and related information
+    """
+    try:
+        logger.info(f"Extracting session ID for order: {order_id} using direct parsing.")
+        
+        # Ensure order_id is a string and not empty
+        if not order_id or not isinstance(order_id, str):
+            logger.warning(f"Invalid order_id provided for session extraction: {order_id}")
+            return {
+                "success": False,
+                "message": "Invalid or missing order_id provided.",
+                "session_ids_data": [],
+                "order_id": order_id
+            }
+
+        query_text = f'{order_id} AND \\"callStartPayment\\"'
+        
+        # Fetch up to 3 logs to ensure we have enough data to find the pattern
+        # The user's last edit set this to 1, but AI rules suggest 1-3 for robustness.
+        # Using 3 here.
+        search_results_dict = await search_logs(
+            query_text=query_text,
+            max_results=3, 
+            ctx=ctx
+        )
+        
+        if not search_results_dict or not search_results_dict.get("success"):
+            error_message = search_results_dict.get('error', 'Unknown error') if search_results_dict else 'No response from search_logs'
+            logger.info(f"Failed to fetch logs for order ID: {order_id}. Error: {error_message}")
+            return {
+                "success": False,
+                "message": f"Failed to fetch logs for order ID: {order_id}. Error: {error_message}",
+                "session_ids_data": [],
+                "order_id": order_id
+            }
+        
+        actual_logs = search_results_dict.get("logs", [])
+        if not actual_logs:
+            logger.info(f"No log entries found in successful search for order ID: {order_id}")
+            return {
+                "success": True, # Search itself was successful, but no relevant log entries
+                "message": f"No log entries matching the order ID and 'callStartPayment' found for order ID: {order_id}",
+                "session_ids_data": [],
+                "order_id": order_id
+            }
+
+        logger.info(f"Found {len(actual_logs)} log entries for order ID: {order_id} to parse for session ID.")
+        
+        extracted_sessions_details = []
+        for i, log_entry in enumerate(actual_logs):
+            session_id_info = {
+                "log_index": i,
+                "original_log_snippet": "",
+                "session_id": None,
+                "status": "not_found_in_log" 
+            }
+            if isinstance(log_entry, dict) and "message" in log_entry and isinstance(log_entry["message"], str):
+                message_content = log_entry["message"]
+                session_id_info["original_log_snippet"] = message_content[:250] # Store a snippet
+
+                parts = message_content.split(" | ")
+                
+                if len(parts) >= 3:
+                    # The session ID is the third segment (index 2)
+                    extracted_id = parts[2].strip()
+                    if extracted_id: # Ensure it's not an empty string
+                        session_id_info["session_id"] = extracted_id
+                        session_id_info["status"] = "extracted"
+                        logger.info(f"Log entry {i}: Extracted session ID: {extracted_id} from message: {message_content[:100]}...")
+                        # Optional: if we only need one, we can break here
+                        # extracted_sessions_details.append(session_id_info)
+                        # break 
+                    else:
+                        session_id_info["status"] = "pattern_match_empty_segment"
+                        logger.warning(f"Log entry {i}: Matched segment count, but session ID segment was empty. Message snippet: {message_content[:100]}...")
+                else:
+                    session_id_info["status"] = "pattern_mismatch_not_enough_segments"
+                    logger.warning(f"Log entry {i}: Message did not match expected segment count for session ID. Message snippet: {message_content[:100]}...")
+            else:
+                session_id_info["status"] = "invalid_log_format_or_missing_message"
+                session_id_info["original_log_snippet"] = str(log_entry)[:250]
+                logger.warning(f"Log entry {i}: Invalid log entry format or missing 'message' field: {str(log_entry)[:250]}...")
+            
+            extracted_sessions_details.append(session_id_info)
+
+        successfully_extracted_ids = [s["session_id"] for s in extracted_sessions_details if s["status"] == "extracted" and s["session_id"]]
+        
+        if successfully_extracted_ids:
+            # As per AI rules, if session_id is found, use it.
+            # If multiple are found from the logs, we will take the first one.
+            final_message = f"Successfully extracted session ID: {successfully_extracted_ids[0]} from {len(actual_logs)} log(s) processed."
+            # Return only the first successfully extracted ID for consistency with previous behavior
+            # where one session_id was expected.
+            return {
+                "success": True,
+                "message": final_message,
+                "session_id": successfully_extracted_ids[0], # Primary extracted ID
+                "all_extraction_attempts": extracted_sessions_details, # Detailed attempts for debugging
+                "order_id": order_id
+            }
+        else:
+            final_message = f"Processed {len(actual_logs)} log(s) for order ID {order_id}, but no session IDs could be definitively extracted based on the 'X | Y | SESSION_ID | ...' pattern."
+            return {
+                "success": True, # Function ran, but no ID extracted
+                "message": final_message,
+                "session_id": None,
+                "all_extraction_attempts": extracted_sessions_details,
+                "order_id": order_id
+            }
+                
+    except Exception as e:
+        logger.error(f"Error in extract_session_id (direct parsing): {str(e)}")
+        import traceback
+        logger.error(f"Stack trace for extract_session_id: {traceback.format_exc()}")
+        return {
+            "success": False,
+            "message": f"An unexpected error occurred while extracting session ID by direct parsing: {str(e)}",
+            "session_id": None,
+            "all_extraction_attempts": [],
+            "order_id": order_id
+        }
+
+@mcp.tool()
+async def discover_indexes(ctx: Context = None) -> Dict:
+    """
+    Discover available Elasticsearch indexes.
+    
+    Returns a list of available index patterns that can be used for searching logs.
+    
+    Returns:
+        Dict: A dictionary containing the list of available index patterns.
+    """
+    global CURRENT_INDEX
+    
+    try:
+        # Get the current auth token
+        current_auth_token = get_auth_token()
+        
+        # Check if we have an auth token
+        if not current_auth_token:
+            return {
+                "success": False,
+                "error": "No authentication token available. Please set it via API or environment variable."
+            }
+
+        # Set cookies
+        cookies = {"_pomerium": current_auth_token}
+        
+        # Set headers
+        headers = {
+            "kbn-version": kibana_version,
+            "Content-Type": "application/json"
+        }
+        
+        # Create a new client for this request
+        async with get_http_client() as client:
+            # First try using Kibana's index pattern API
+            url = f"https://{kibana_host}{kibana_base_path}/api/saved_objects/_find?type=index-pattern"
+            
+            try:
+                response = await client.get(url, headers=headers, cookies=cookies)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    
+                    if "saved_objects" in result:
+                        index_patterns = []
+                        
+                        for pattern in result["saved_objects"]:
+                            if "attributes" in pattern and "title" in pattern["attributes"]:
+                                index_patterns.append(pattern["attributes"]["title"])
+                        
+                        # Get information about current index
+                        current_index_info = CURRENT_INDEX or es_config.get("index_prefix", None)
+                        current_message = f"Current index: {current_index_info}" if current_index_info else "No index currently selected."
+                        
+                        return {
+                            "success": True,
+                            "message": f"Found {len(index_patterns)} index patterns. {current_message}",
+                            "index_patterns": index_patterns,
+                            "current_index": current_index_info
+                        }
+                    else:
+                        logger.warning(f"No index patterns found in Kibana")
+                else:
+                    logger.warning(f"Failed to get index patterns: {response.status_code}")
+            except Exception as e:
+                logger.warning(f"Exception getting index patterns: {e}")
+            
+            # Fallback: Try to get indices directly from Elasticsearch
+            try:
+                # Try to access ES cat indices
+                url = f"https://{kibana_host}/_plugin/kibana/internal/search/es"
+                
+                # Format for the data API
+                payload = {
+                    "params": {
+                        "index": "_cat/indices",
+                        "body": {
+                            "format": "json"
+                        }
+                    }
+                }
+                
+                response = await client.post(url, json=payload, headers=headers, cookies=cookies)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if "rawResponse" in result:
+                        indices = result["rawResponse"]
+                        
+                        if isinstance(indices, list):
+                            index_names = [index.get("index") for index in indices if "index" in index]
+                            
+                            # Extract unique prefixes by removing timestamp patterns
+                            index_prefixes = set()
+                            for name in index_names:
+                                # Extract the prefix (everything before the date pattern)
+                                parts = name.split('-')
+                                if len(parts) > 1:
+                                    try:
+                                        # Check if the last part contains a date
+                                        if parts[-1].isdigit() and len(parts[-1]) == 8:  # YYYYMMDD
+                                            prefix = '-'.join(parts[:-1])
+                                            index_prefixes.add(prefix)
+                                        else:
+                                            index_prefixes.add(name)
+                                    except:
+                                        index_prefixes.add(name)
+                                else:
+                                    index_prefixes.add(name)
+                            
+                            # Convert to list and add wildcard
+                            index_patterns = [f"{prefix}-*" for prefix in index_prefixes]
+                            
+                            # Get information about current index
+                            current_index_info = CURRENT_INDEX or es_config.get("index_prefix", None)
+                            current_message = f"Current index: {current_index_info}" if current_index_info else "No index currently selected."
+                            
+                            return {
+                                "success": True,
+                                "message": f"Found {len(index_patterns)} index patterns through direct ES query. {current_message}",
+                                "index_patterns": index_patterns,
+                                "current_index": current_index_info
+                            }
+                
+                logger.warning(f"Failed to get indices directly: {response.status_code}")
+            except Exception as e:
+                logger.warning(f"Exception getting indices directly: {e}")
+        
+        # If we get here, we failed to get indices through any method
+        return {
+            "success": False,
+            "error": "Failed to retrieve index patterns from Kibana or Elasticsearch."
+        }
+        
+    except Exception as e:
+        logger.error(f"Error discovering indexes: {e}")
+        import traceback
+        logger.error(f"Stack trace: {traceback.format_exc()}")
+        return {
+            "success": False,
+            "error": f"Error discovering indexes: {str(e)}"
+        }
+
+@mcp.tool()
+async def set_current_index(index_pattern: str, ctx: Context = None) -> Dict:
+    """
+    Set the current index pattern to use for log searches.
+    
+    Args:
+        index_pattern (str): The index pattern to use for searching logs.
+        
+    Returns:
+        Dict: A dictionary indicating success or failure.
+    """
+    global CURRENT_INDEX
+    
+    try:
+        # Validate that the index pattern is not empty
+        if not index_pattern or not isinstance(index_pattern, str):
+            return {
+                "success": False,
+                "error": "Invalid index pattern provided."
+            }
+        
+        # Store the new index pattern
+        CURRENT_INDEX = index_pattern
+        
+        logger.info(f"Current index pattern set to: {CURRENT_INDEX}")
+        
+        return {
+            "success": True,
+            "message": f"Current index pattern set to: {CURRENT_INDEX}"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error setting current index: {e}")
+        import traceback
+        logger.error(f"Stack trace: {traceback.format_exc()}")
+        return {
+            "success": False,
+            "error": f"Error setting current index: {str(e)}"
         }
 
 # Start the server if run directly
@@ -1364,6 +2371,43 @@ if __name__ == "__main__":
                                 },
                                 "required": []
                             }
+                        },
+                        {
+                            "name": "extract_session_id",
+                            "description": "Extract session IDs from logs related to a specific order ID.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "order_id": {
+                                        "type": "string",
+                                        "description": "The order ID to search for in logs"
+                                    }
+                                },
+                                "required": ["order_id"]
+                            }
+                        },
+                        {
+                            "name": "discover_indexes",
+                            "description": "Discover available Elasticsearch indexes for searching logs",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {},
+                                "required": []
+                            }
+                        },
+                        {
+                            "name": "set_current_index",
+                            "description": "Set the current index pattern to use for log searches",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "index_pattern": {
+                                        "type": "string",
+                                        "description": "The index pattern to use for searching logs"
+                                    }
+                                },
+                                "required": ["index_pattern"]
+                            }
                         }
                     ]
                     
@@ -1473,15 +2517,23 @@ if __name__ == "__main__":
                         "result": result,
                         "id": request_id
                     }
-                elif method == "correlate_with_code":
-                    result = await correlate_with_code(**params)
+
+                elif method == "extract_session_id":
+                    result = await extract_session_id(**params)
                     return {
                         "jsonrpc": "2.0",
                         "result": result,
                         "id": request_id
                     }
-                elif method == "stream_logs_realtime":
-                    result = await stream_logs_realtime(**params)
+                elif method == "discover_indexes":
+                    result = await discover_indexes(**params)
+                    return {
+                        "jsonrpc": "2.0",
+                        "result": result,
+                        "id": request_id
+                    }
+                elif method == "set_current_index":
+                    result = await set_current_index(**params)
                     return {
                         "jsonrpc": "2.0",
                         "result": result,
@@ -1561,13 +2613,13 @@ if __name__ == "__main__":
         async def api_extract_errors(request_data: dict):
             return await extract_errors(**request_data)
             
-        @app.post("/api/correlate_with_code")
-        async def api_correlate_with_code(request_data: dict):
-            return await correlate_with_code(**request_data)
+
             
-        @app.post("/api/stream_logs_realtime")
-        async def api_stream_logs_realtime(request_data: dict):
-            return await stream_logs_realtime(**request_data)
+
+            
+        @app.post("/api/summarize_logs")
+        async def api_summarize_logs(request_data: dict):
+            return await summarize_logs(**request_data)
             
         @app.get("/tools")
         async def api_tools():
@@ -1593,131 +2645,44 @@ if __name__ == "__main__":
                         "name": "extract_errors",
                         "description": "Extract error logs with optional stack traces"
                     },
+
                     {
-                        "name": "correlate_with_code",
-                        "description": "Correlate error logs with code locations"
+                        "name": "summarize_logs",
+                        "description": "Search logs and generate AI-powered analysis using Neurolink"
                     },
                     {
-                        "name": "stream_logs_realtime",
-                        "description": "Stream logs in real-time for monitoring"
+                        "name": "discover_indexes",
+                        "description": "Discover available Elasticsearch indexes for searching logs"
+                    },
+                    {
+                        "name": "set_current_index",
+                        "description": "Set the current index pattern to use for log searches"
                     }
                 ]
             }
         
-        # SSE endpoint for realtime log streaming
-        @app.get("/stream")
-        async def stream_logs_sse(request: Request, duration: int = 60, filter: Optional[str] = None):
-            """Stream logs in real-time using Server-Sent Events."""
-            async def event_generator():
-                """Generate events for SSE streaming."""
-                # Set up streaming
-                max_logs = CONFIG["processing"]["max_logs"]
-                poll_interval = 2  # seconds
-                seen_log_ids = set()  # Track seen logs by ID to avoid duplicates
-                
-                # Get the current time to use as a reference point
-                now = datetime.datetime.now(datetime.timezone.utc)
-                start_time = now.isoformat()
-                
-                # Define timestamp fields to check for time-based filtering
-                timestamp_fields = ["@timestamp", "timestamp", "time", "start_time", "created_at"]
-                
-                # Build query
-                query = {"match_all": {}}
-                
-                if filter:
-                    query = {
-                        "query_string": {
-                            "query": filter
-                        }
-                    }
-                
-                # Send initial connection event
-                yield {"event": "connected", "data": {"status": "connected", "server": "Kibana MCP"}}
-                
-                # Calculate number of polls
-                num_polls = duration // poll_interval
-                
-                try:
-                    for i in range(num_polls):
-                        if await request.is_disconnected():
-                            logger.info("Client disconnected from SSE stream")
-                            break
-                            
-                        try:
-                            # Update query to only get logs since we started
-                            time_should_clauses = []
-                            for field in timestamp_fields:
-                                time_should_clauses.append({
-                                    "range": {
-                                        field: {
-                                            "gte": start_time
-                                        }
-                                    }
-                                })
-                            
-                            # Combine with original query
-                            time_query = {
-                                "bool": {
-                                    "must": [query],
-                                    "should": time_should_clauses,
-                                    "minimum_should_match": 1
-                                }
-                            }
-                            
-                            # Execute search
-                            index_pattern = f"{es_config['index_prefix']}*"
-                            result = await kibana_search(index_pattern, time_query, size=50)
-                            
-                            if "error" in result:
-                                logger.error(f"Error in poll {i}: {result['error']}")
-                                yield {"event": "error", "data": {"error": result['error']}}
-                                # Continue polling despite errors
-                                await asyncio.sleep(poll_interval)
-                                continue
-                            
-                            # Process results
-                            new_logs = []
-                            if "hits" in result and "hits" in result["hits"]:
-                                for doc in result["hits"]["hits"]:
-                                    log = doc["_source"]
-                                    
-                                    # Create a unique ID for the log
-                                    log_id = doc.get("_id", hash(json.dumps(log, sort_keys=True)))
-                                    
-                                    if log_id not in seen_log_ids:
-                                        seen_log_ids.add(log_id)
-                                        
-                                        # Normalize timestamp field
-                                        for field in timestamp_fields:
-                                            if field in log:
-                                                log["normalized_timestamp"] = log[field]
-                                                break
-                                                
-                                        new_logs.append(log)
-                            
-                            # Send any new logs as events
-                            if new_logs:
-                                yield {"event": "logs", "data": {"logs": new_logs, "count": len(new_logs)}}
-                                
-                        except Exception as e:
-                            logger.error(f"Error during SSE poll {i}: {e}")
-                            yield {"event": "error", "data": {"error": str(e)}}
-                            
-                        # Send a ping event to keep the connection alive
-                        yield {"event": "ping", "data": {"time": time.time()}}
-                        
-                        # Wait for next poll
-                        await asyncio.sleep(poll_interval)
-                        
-                except Exception as e:
-                    logger.error(f"Error in SSE stream: {e}")
-                    yield {"event": "error", "data": {"error": str(e)}}
-                    
-                # Final message before closing
-                yield {"event": "complete", "data": {"message": "Stream completed"}}
-                
-            return EventSourceResponse(event_generator())
+
+        
+        @app.post("/api/extract_session_id")
+        async def api_extract_session_id(request_data: dict):
+            order_id = request_data.get("order_id")
+            if not order_id:
+                return {"success": False, "message": "Order ID is required"}
+            return await extract_session_id(order_id=order_id)
+        
+        @app.get("/api/discover_indexes")
+        async def api_discover_indexes():
+            """Discover available Elasticsearch indexes."""
+            result = await discover_indexes()
+            return JSONResponse(content=result)
+            
+        @app.post("/api/set_current_index")
+        async def api_set_current_index(request_data: dict):
+            """Set the current index pattern to use."""
+            index_pattern = request_data.get("index_pattern")
+            if not index_pattern:
+                return {"success": False, "message": "Index pattern is required"}
+            return await set_current_index(index_pattern=index_pattern)
         
         # Start the FastAPI app
         uvicorn.run(app, host=host, port=port)

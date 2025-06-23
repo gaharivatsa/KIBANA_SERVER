@@ -2,11 +2,42 @@
 
 
 ## 🚨 MANDATORY REQUIREMENTS
-1. **ALWAYS request `session_id` from the user , if not given ask whether can i use order id to get id and proceed . if yes then do so ** - this is required for all queries
-2. **ALWAYS include `session_id` in KQL queries** using format: `"{session_id} AND additional_query"`
-3. **ALWAYS use Kibana Query Language (KQL)** for all query formatting
-4. **Set auth token first** before using any other endpoint
-5. **Parse and present results clearly** in a structured format
+1. **Set auth token first** before using any other endpoint
+2. **NEXT ask user which index to use** - after setting auth token but before asking for session ID
+   - If user asks to "get index" or "show indexes", call discover_indexes
+   - Have user select an index using set_current_index before proceeding
+3. **ALWAYS request `session_id` from the user , if not given ask whether can i use order id to get id and proceed . if yes then do so ** - this is required for all queries
+4. **ALWAYS include `session_id` in KQL queries** using format: `"{session_id} AND additional_query"`
+5. **ALWAYS use Kibana Query Language (KQL)** for all query formatting
+6. **ALWAYS use ISO format timestamps** (e.g., "2023-06-15T00:00:00Z") instead of relative time strings
+7. **Parse and present results clearly** in a structured format
+8. **dont use summarize_logs by yourself , use only when user asks for log summary  . 
+9. **Detect and use the right index** - allow users to discover and select the appropriate index for their company
+
+
+
+How to Perform Root Cause Analysis (RCA)
+Start with the Session ID:
+Begin the RCA process immediately after obtaining the session_id.
+
+Initial Log Extraction:
+Fetch the first 200 logs in ascending order using only the session_id as the query. This sets the baseline timeline.
+
+Understand the Anomaly:
+Analyze the user-reported issue and begin identifying patterns or anomalies in the initial log batch.
+
+Craft Intelligent Queries:
+Use insights from the codebase to construct advanced, context-aware queries that help narrow down potential causes.
+
+Correlate Logs with Code:
+As logs are fetched, map them to related functions, services, and error flows in the codebase to deepen understanding.
+
+Iterate & Converge:
+Refine your queries recursively, incorporating knowledge from previous logs and the codebase. Keep digging until you clearly identify the root cause.
+
+Optimize Query Strategy:
+⚠️ Always choose the most effective query for faster convergence. Maintain clarity and precision at every step—accuracy is non-negotiable.
+
 
 ## 🔑 AUTHENTICATION SETUP (REQUIRED FIRST STEP)
 ```bash
@@ -20,12 +51,58 @@ Example:
 curl -X POST http://localhost:8000/api/set_auth_token -H "Content-Type: application/json" -d '{"auth_token":"asdahduwdnsaiuefehasadflhy"}'
 ```
 
+## 🗂️ INDEX SELECTION (SECOND STEP FOR NEW USERS)
+
+1. **Discover available indexes:**
+   ```bash
+   curl -X GET http://localhost:8000/api/discover_indexes
+   ```
+
+2. **Set the index to use:**
+   ```bash
+   curl -X POST http://localhost:8000/api/set_current_index \
+     -H "Content-Type: application/json" \
+     -d '{"index_pattern": "YOUR_INDEX_PATTERN"}'
+   ```
+
+   Example:
+   ```bash
+   curl -X POST http://localhost:8000/api/set_current_index \
+     -H "Content-Type: application/json" \
+     -d '{"index_pattern": "estio-logs-*"}'
+   ```
+
+3. **When a user says they're from a specific company:**
+   - First discover available indexes
+   - Look for index patterns that might match their company name
+   - Suggest setting the index that seems most appropriate
+   - If unsure, ask the user to select from the available indexes
+   
+4. **Index preference persistence:**
+   - Once set, the index preference will persist until changed
+   - If a user switches companies or needs a different index, use set_current_index again
+
 
 To extract the **Session ID** using the **Order ID** from Kibana logs during the `callStartPayment` phase.
 
 ### 🔍 Step-by-Step Rule:
 
-1. **Search Query:**
+1. **Use the extract_session_id Endpoint (Preferred Method):**
+
+   ```bash
+   curl -X POST http://localhost:8000/api/extract_session_id \
+     -H "Content-Type: application/json" \
+     -d '{
+       "order_id": "YOUR_ORDER_ID_HERE"
+     }'
+   ```
+
+   * This endpoint uses Neurolink AI to automatically extract session IDs
+   * It follows all the rules below and returns structured results
+
+2. **Fallback Method (If extract_session_id Fails):**
+   
+   Use the search_logs endpoint with this query:
 
    ```kibana
    {Order ID} AND "callStartPayment"
@@ -33,8 +110,9 @@ To extract the **Session ID** using the **Order ID** from Kibana logs during the
 
    * Replace `{Order ID}` with the actual order ID.
    * Use Kibana Query Language (KQL) in the query box.
+   * max_results must always be 1-3
 
-2. **Analyze Response Logs:**
+3. **Analyze Response Logs (For Fallback Method):**
 
    * Look for log lines that start with this pattern:
 
@@ -44,6 +122,12 @@ To extract the **Session ID** using the **Order ID** from Kibana logs during the
 
      * The line always starts with a prefix like `message:`num followed by two pipe-separated values.
      * The **third segment** (after the second `|`) is the **Session ID**.
+     * max_results must always be 1-3
+
+4. **IMPORTANT: If the extract_session_id endpoint fails, you MUST use the fallback method with search_logs**
+   * Parse the logs manually using the pattern above
+   * Extract the session ID from the third segment after the second pipe character
+   * Proceed with the extracted session ID for subsequent queries
 
 ---
 
@@ -61,20 +145,22 @@ this will be triggered by user saying search based on functions
 | Endpoint | Primary Use Case | Key Parameters |
 |----------|------------------|----------------|
 | `/api/search_logs` | **MAIN ENDPOINT** - Find specific logs | `query_text`, `max_results`, time filters |
+| `/api/extract_session_id` | **EXTRACT SESSION ID** - Get session ID from order ID | `order_id` |
 | `/api/get_recent_logs` | View latest logs | `count`, `level` |
 | `/api/analyze_logs` | Identify patterns | `time_range`, `group_by` |
 | `/api/extract_errors` | Find errors | `hours`, `include_stack_traces`, `limit` |
-| `/api/correlate_with_code` | Link logs to code | `error_message`, `repo_path` |
-| `/api/stream_logs_realtime` | Monitor live logs | `query_text`, duration |
+
+| `/api/summarize_logs` | 🧠 **AI-POWERED** - Generate intelligent log analysis | Same as `search_logs` + AI analysis |
+| `/api/discover_indexes` | List available indexes | None |
+| `/api/set_current_index` | Select index for searches | `index_pattern` |
 
 ## 🔎 SEARCH_LOGS ENDPOINT - DETAILED SPECIFICATION
 
 ### Required Parameters:
 - `query_text`: String using KQL format - MUST include `{session_id}` + query terms
-
+- `max_results`: Integer (default: 100) - Number of results to return (adjust to your needs)
 ### Optional Parameters:
-- `max_results`: Integer (default: 100) - Number of results to return
-- `start_time`/`end_time`: ISO timestamps or relative time strings (e.g., "24h")
+- `start_time`/`end_time`: ISO timestamps (e.g., "2023-06-15T00:00:00Z")
 - `levels`: Array of log levels to include (e.g., ["ERROR", "WARN"])
 - `include_fields`/`exclude_fields`: Arrays of field names
 - `sort_by`: Field to sort by - MUST use a valid timestamp field name (`timestamp`, `@timestamp`, or `start_time`)
@@ -106,22 +192,12 @@ curl -X POST http://localhost:8000/api/search_logs \
   -H "Content-Type: application/json" \
   -d '{
     "query_text": "{session_id} AND payment",
-    "start_time": "2025-05-25T00:00:00Z",
-    "end_time": "2025-05-26T00:00:00Z"
+    "start_time": "2023-06-15T00:00:00Z",
+    "end_time": "2023-06-16T00:00:00Z"
   }'
 ```
 
-#### 3. Search with Relative Time
-```bash
-curl -X POST http://localhost:8000/api/search_logs \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query_text": "{session_id} AND error",
-    "start_time": "24h"
-  }'
-```
-
-#### 4. Search for Specific Transaction
+#### 3. Search with Specific Transaction
 ```bash
 curl -X POST http://localhost:8000/api/search_logs \
   -H "Content-Type: application/json" \
@@ -131,7 +207,7 @@ curl -X POST http://localhost:8000/api/search_logs \
   }'
 ```
 
-#### 5. Search with Correct Sorting
+#### 4. Search with Correct Sorting
 ```bash
 curl -X POST http://localhost:8000/api/search_logs \
   -H "Content-Type: application/json" \
@@ -139,6 +215,15 @@ curl -X POST http://localhost:8000/api/search_logs \
     "query_text": "{session_id} AND payment",
     "sort_by": "timestamp",
     "sort_order": "desc"
+  }'
+```
+
+#### 5. Extract Session ID from Order ID
+```bash
+curl -X POST http://localhost:8000/api/extract_session_id \
+  -H "Content-Type: application/json" \
+  -d '{
+    "order_id": "ORDER_12345"
   }'
 ```
 
@@ -164,24 +249,59 @@ curl -X POST http://localhost:8000/api/get_recent_logs \
   }'
 ```
 
-### Stream Logs in Real-Time
+
+
+!CAUTION DONT USE THIS ENDPOINT WITHOUT USER EXPLICITLY ASKING FOR IT (summarize_logs)
+### 🧠 AI-Powered Log Analysis (SUMMARIZE_LOGS)
 ```bash
-curl -X POST http://localhost:8000/api/stream_logs_realtime \
+curl -X POST http://localhost:8000/api/summarize_logs \
   -H "Content-Type: application/json" \
   -d '{
-    "query_text": "{session_id}"
+    "query_text": "{session_id} AND {other query}",
+    "max_results": 50,
+    "start_time": "2023-06-15T00:00:00Z",
+    "end_time": "2023-06-16T00:00:00Z"
   }'
 ```
 
+**What it does:**
+- Searches logs using the same parameters as `search_logs`
+- Uses AI (Neurolink) to generate intelligent analysis
+- Provides structured insights including:
+  - Summary of activities and systems involved
+  - Key insights and patterns
+  - Errors and exceptions with details
+  - Function calls and critical methods
+  - Chronological flow of events
+  - Anomalies and suspicious behavior
+  - Focus areas needing attention
+  - Recommendations for fixes
+
+**When to use:**
+- When you need to understand complex log patterns
+- For root cause analysis of issues
+- When dealing with large volumes of logs
+- For generating reports or summaries
+- When you need actionable insights from logs
+
+**Requirements:**
+- Requires Node.js and Neurolink (automatically set up when starting server)
+- Requires AI provider API key for full AI features. 
+  Set via environment variable (e.g., `export GOOGLE_AI_API_KEY=...`) 
+  OR in `config.yaml` under `ai_providers` (config values take precedence).
+  Google AI Studio key is recommended (has a free tier).
+- May take longer than regular search due to AI processing
+
 ## 🔄 AI DECISION FLOW
 
-1. **Request `session_id` from user** (if not provided)
-2. **Set auth token** (if not already set)
-3. **Determine appropriate endpoint** based on user intent:
+1. **Set auth token** (if not already set)
+2. **Ask which index to use** and call discover_indexes if needed
+3. **Request `session_id` from user** (if not provided)
+4. **Determine appropriate endpoint** based on user intent:
    - For specific searches → `search_logs`
    - For recent errors → `get_recent_logs` or `extract_errors`
    - For pattern analysis → `analyze_logs`
-   - For live monitoring → `stream_logs_realtime`
+   - **For intelligent analysis/insights → `summarize_logs` (AI-powered)**
 4. **Construct query** using KQL format: `"{session_id} AND <query terms>"`
 5. **Select appropriate parameters** (time range, result limits, etc.)
 6. **Execute request** using the curl command
@@ -190,7 +310,7 @@ curl -X POST http://localhost:8000/api/stream_logs_realtime \
 ## 📌 IMPORTANT NOTES
 
 - Always replace `{session_id}` with the actual session ID in queries
-- Prefer absolute time ranges (`start_time` and `end_time`) when possible
+- Always use ISO format timestamps (e.g., "2023-06-15T00:00:00Z") instead of relative time strings
 - Include relevant context in queries to narrow results
 - Use field filters (`include_fields` and `exclude_fields`) for large result sets
 - Set appropriate `max_results` to balance detail vs. performance
