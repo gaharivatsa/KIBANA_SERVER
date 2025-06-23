@@ -44,9 +44,15 @@ DYNAMIC_AUTH_TOKEN = None
 CURRENT_INDEX = None
 
 # Load configuration
-def load_config(config_path: str = "config.yaml") -> Dict:
+def load_config(config_path: str = None) -> Dict:
     """Load the configuration from a YAML file."""
     try:
+        # Use absolute path with fallback to relative
+        if config_path is None:
+            # Get directory of the current script
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            config_path = os.path.join(script_dir, "config.yaml")
+            
         with open(config_path, 'r') as file:
             return yaml.safe_load(file)
     except Exception as e:
@@ -2160,9 +2166,6 @@ if __name__ == "__main__":
     if not auth_cookie:
         logger.warning("No authentication cookie provided in environment. You can set it via API or config.")
     
-    # Configure logging
-    # configure_logging() # This line might re-add it if not removed from the function itself.
-    
     # Parse arguments
     parser = argparse.ArgumentParser(description='Kibana Log MCP Server')
     parser.add_argument('--host', default='127.0.0.1', help='Host to bind to')
@@ -2190,6 +2193,13 @@ if __name__ == "__main__":
             
             # Otherwise return regular JSON response
             return {"message": "Kibana MCP Server", "version": CONFIG["mcp_server"]["version"]}
+        
+        # Add support for Server-Sent Events (SSE) endpoint for Cursor MCP integration
+        @app.get("/sse")
+        async def sse_endpoint(request: Request):
+            """Serve SSE requests from Cursor for MCP integration."""
+            logger.info("SSE connection established for MCP")
+            return await mcp.handle_sse(request)
         
         # Add MCP endpoints required by Smithery with lazy loading support
         @app.get("/mcp")

@@ -30,7 +30,6 @@ processing:
   # Default fields to include in log results
   default_fields: ["@timestamp", "level", "message", "event", "context"]
   # Fields to extract for code correlation
-  code_correlation_fields: ["error.stack_trace", "context.file", "context.line"]
   # Cache TTL for repeated queries
   cache_ttl_seconds: 300
   # Query timeout
