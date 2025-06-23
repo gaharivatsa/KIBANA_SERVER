@@ -86,7 +86,7 @@ log_source:
 # but you can configure them here for convenience.
 # Ensure this file is appropriately secured if you store keys here.
 ai_providers:
-  google_ai_api_key: "AIzaSyAaw8DtBQUZ-sRKOvTxiMRpzUQnemdIH2M"  # e.g., "AIza..."
+  google_ai_api_key: ""  # e.g., "AIza..."
   openai_api_key: ""     # e.g., "sk-..."
   anthropic_api_key: ""  # e.g., "sk-ant-..."
   # Add other Neurolink supported provider keys here as needed
