@@ -105,7 +105,7 @@ echo "paste the below content to use this tool as mcp"
 
 echo '
   "kibana-logs": {
-    "command": "'"$(pwd)/KIBANA_ENV/bin/python"'",
+    "command": "'"$(pwd)/venv/bin/python"'",
     "args": [
       "'"$(pwd)/kibana_mcp_server.py"'",
       "--transport", "stdio"
