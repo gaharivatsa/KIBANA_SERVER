@@ -2,17 +2,45 @@
 
 
 ## 🚨 MANDATORY REQUIREMENTS
-1. **Set auth token first** before using any other endpoint
-2. **NEXT ask user which index to use** - after setting auth token but before asking for session ID
+1. **SETUP DYNAMIC CONFIGURATION (FIRST STEP - MANDATORY IF DEFAULTS ARE NOT SUITABLE)**
+   - Before proceeding to any other steps, if the default server configurations are not suitable for the user's environment or task, you MUST use the `/api/set_config` endpoint to adjust them.
+   - SAY TO USER WHAT ALL CONFIGS TO SET 
+   - This allows tailoring the server's behavior (e.g., target Kibana instance, log processing parameters) without manual `config.yaml` edits or server restarts.
+   - **Endpoint:** `POST /api/set_config`
+   - **Request Body Example:**
+     ```json
+     {
+       "key_path": "elasticsearch.host",
+       "value": "your-company-kibana.example.com"
+     }
+     ```
+   - **Commonly Used Configuration Keys (key_path: value_type - example_value):**
+     - `elasticsearch.host`: string - e.g., "kibana.example.com" (Target Kibana host)
+     - `elasticsearch.port`: integer - e.g., 443 (Target Kibana port)
+     - `elasticsearch.timestamp_field`: string - e.g., "@timestamp", "timestamp", "start_time" (Primary timestamp field in logs)
+     - `elasticsearch.verify_ssl`: boolean - e.g., true, false (Whether to verify SSL for Kibana connection)
+     - `mcp_server.log_level`: string - e.g., "info", "debug", "error" (Server's own logging verbosity)
+     - `processing.max_logs`: integer - e.g., 500 (Default max logs for `search_logs` if not specified in request)
+     - `processing.default_time_range`: string - e.g., "1h", "24h", "7d" (Default time range for queries if not specified)
+     - `processing.cache_ttl_seconds`: integer - e.g., 300 (Cache duration for repeated queries)
+     - `processing.timeout_seconds`: integer - e.g., 60 (Timeout for Kibana queries)
+     - `ai_response_settings.temperature`: float - e.g., 0.3 (Controls AI creativity, lower is more factual)
+     - `ai_response_settings.max_tokens`: integer - e.g., 2000000 (Max tokens for AI generated responses)
+     - `ai_response_settings.detailed_mode`: boolean - e.g., true (Enable more detailed AI responses)
+     - `ai_providers.google_ai_api_key`: string - e.g., "AIza..." (Set Google AI API key; **Caution: handle API keys securely**)
+     - `ai_providers.openai_api_key`: string - e.g., "sk-..." (Set OpenAI API key; **Caution: handle API keys securely**)
+   - **Note:** Only set these if you understand their impact or if instructed by the user. Incorrect values might lead to errors. The server will use values from `config.yaml` if not dynamically overridden.
+2. **Set auth token first** before using any other endpoint
+3. **NEXT ask user which index to use** - after setting auth token but before asking for session ID
    - If user asks to "get index" or "show indexes", call discover_indexes
    - Have user select an index using set_current_index before proceeding
-3. **ALWAYS request `session_id` from the user , if not given ask whether can i use order id to get id and proceed . if yes then do so ** - this is required for all queries
-4. **ALWAYS include `session_id` in KQL queries** using format: `"{session_id} AND additional_query"`
-5. **ALWAYS use Kibana Query Language (KQL)** for all query formatting
-6. **ALWAYS use ISO format timestamps** (e.g., "2023-06-15T00:00:00Z") instead of relative time strings
-7. **Parse and present results clearly** in a structured format
-8. **dont use summarize_logs by yourself , use only when user asks for log summary  . 
-9. **Detect and use the right index** - allow users to discover and select the appropriate index for their company
+4. **ALWAYS request `session_id` from the user , if not given ask whether can i use order id to get id and proceed . if yes then do so ** - this is required for all queries
+5. **ALWAYS include `session_id` in KQL queries** using format: `"{session_id} AND additional_query"`
+6. **ALWAYS use Kibana Query Language (KQL)** for all query formatting
+7. **ALWAYS use ISO format timestamps** (e.g., "2023-06-15T00:00:00Z") instead of relative time strings
+8. **Parse and present results clearly** in a structured format
+9. **dont use summarize_logs by yourself , use only when user asks for log summary  . 
+10. **Detect and use the right index** - allow users to discover and select the appropriate index for their company
 
 
 

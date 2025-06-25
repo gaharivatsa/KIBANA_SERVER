@@ -36,12 +36,16 @@ import uvicorn
 from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
+import traceback
 
 # Store the dynamic auth token
 DYNAMIC_AUTH_TOKEN = None
 
 # Store the current selected index
 CURRENT_INDEX = None
+
+# Store the dynamic config overrides
+DYNAMIC_CONFIG_OVERRIDES = {}
 
 # Load configuration
 def load_config(config_path: str = None) -> Dict:
@@ -89,8 +93,15 @@ def get_auth_token():
 # Function to get a properly configured HTTP client
 def get_http_client():
     """Get an HTTP client with proper configuration."""
+    # Get verify_ssl from dynamic config or fallback to es_config
+    verify_ssl = get_config_value('elasticsearch.verify_ssl', es_config.get('verify_ssl', True), expected_type=bool)
+    
+    # Ensure verify_ssl is a boolean (httpx requires boolean, not string)
+    if isinstance(verify_ssl, str):
+        verify_ssl = verify_ssl.lower() == "true"
+    
     return httpx.AsyncClient(
-        verify=es_config.get('verify_ssl', True),
+        verify=verify_ssl,
         follow_redirects=True,
         timeout=30.0,
         limits=httpx.Limits(max_keepalive_connections=10, max_connections=20)
@@ -123,8 +134,10 @@ async def kibana_search(index_pattern: str, query: Dict, size: int = 10, sort: L
     # Log which index we're using
     logger.debug(f"Searching in index: {actual_index} (user requested: {index_pattern})")
     
-    # Prepare the search request
-    url = f"https://{kibana_host}{kibana_base_path}/internal/search/es"
+    # Prepare the search request - use dynamic config if available
+    host = get_config_value('elasticsearch.host', kibana_host)
+    base_path = get_config_value('elasticsearch.kibana_api.base_path', kibana_base_path)
+    url = f"https://{host}{base_path}/internal/search/es"
     
     # Build request payload
     search_body = {
@@ -133,7 +146,7 @@ async def kibana_search(index_pattern: str, query: Dict, size: int = 10, sort: L
     }
     
     # Get timestamp field from config - default to '@timestamp' which is the Elasticsearch standard
-    timestamp_field = es_config.get('timestamp_field', '@timestamp')
+    timestamp_field = get_config_value('elasticsearch.timestamp_field', es_config.get('timestamp_field', '@timestamp'))
     
     # Check the index pattern to see if we have a specific config for it
     for source in CONFIG.get('log_sources', []):
@@ -2158,6 +2171,171 @@ async def set_current_index(index_pattern: str, ctx: Context = None) -> Dict:
             "success": False,
             "error": f"Error setting current index: {str(e)}"
         }
+
+@mcp.tool()
+async def set_config(configs_to_set: Dict[str, Any], ctx: Context = None) -> Dict:
+    """
+    Set one or more configuration values dynamically.
+    
+    Args:
+        configs_to_set: A dictionary where keys are dot-notation paths
+                        to the config keys (e.g., 'elasticsearch.host')
+                        and values are the values to set. Values will be
+                        auto-converted to boolean, int, or float if they
+                        match common patterns (e.g., "true", "false", "123", "12.34").
+                        Otherwise, they are treated as strings.
+    
+    Returns:
+        Dict containing overall success status and a list of messages for each config.
+    """
+    global DYNAMIC_CONFIG_OVERRIDES, CONFIG
+    results = []
+    all_successful = True
+
+    for key_path, value in configs_to_set.items():
+        try:
+            converted_value = value 
+
+            if isinstance(value, str):
+                if value.lower() == "true":
+                    converted_value = True
+                elif value.lower() == "false":
+                    converted_value = False
+                elif value.isdigit():
+                    converted_value = int(value)
+                elif value.replace(".", "", 1).isdigit() and value.count(".") == 1:
+                    converted_value = float(value)
+            
+            DYNAMIC_CONFIG_OVERRIDES[key_path] = converted_value
+            
+            keys = key_path.split('.')
+            current_config_level = CONFIG
+            for i, key_part in enumerate(keys[:-1]):
+                if key_part not in current_config_level or not isinstance(current_config_level[key_part], dict):
+                    current_config_level[key_part] = {} 
+                current_config_level = current_config_level[key_part]
+            
+            current_config_level[keys[-1]] = converted_value
+            
+            message = f"Successfully set: {key_path} = {converted_value} (type: {type(converted_value).__name__})"
+            logger.info(message)
+            results.append({"key_path": key_path, "status": "success", "message": message})
+
+        except Exception as e:
+            error_message = f"Error setting {key_path} to {value}: {str(e)}"
+            logger.error(error_message)
+            results.append({"key_path": key_path, "status": "error", "message": error_message, "trace": traceback.format_exc()})
+            all_successful = False
+            
+    return {
+        "overall_success": all_successful,
+        "details": results
+    }
+
+@mcp.tool()
+async def get_ai_rules(ctx: Context = None) -> Dict:
+    """
+    Get the AI rules file content.
+    
+    IMPORTANT: Reading these rules must be the first and foremost step before using this API.
+    
+    Returns:
+        Dict containing success status and the rules content
+    """
+    try:
+        # Get directory of the current script
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        rules_path = os.path.join(script_dir, "AI_rules_file.txt")
+        
+        if os.path.exists(rules_path):
+            with open(rules_path, 'r') as file:
+                rules_content = file.read()
+            
+            return {
+                "success": True,
+                "message": "AI rules retrieved successfully. IMPORTANT: Review these rules carefully before using the API.",
+                "rules": rules_content
+            }
+        else:
+            return {
+                "success": False,
+                "message": "AI rules file not found",
+                "rules": "File not found: AI_rules_file.txt"
+            }
+    except Exception as e:
+        logger.error(f"Error retrieving AI rules: {e}")
+        return {
+            "success": False,
+            "message": f"Error retrieving AI rules: {str(e)}",
+            "rules": None
+        }
+
+# Modified get_config function to check dynamic overrides first
+def get_config_value(key_path, default=None, expected_type=None):
+    """
+    Get a configuration value, checking dynamic overrides first.
+    
+    Args:
+        key_path: Dot-notation path to the config key
+        default: Default value if key doesn't exist
+        expected_type: Optional type to convert the value to
+    
+    Returns:
+        The config value with proper type conversion
+    """
+    global DYNAMIC_CONFIG_OVERRIDES, CONFIG
+    
+    # Check if we have a dynamic override
+    if key_path in DYNAMIC_CONFIG_OVERRIDES:
+        value = DYNAMIC_CONFIG_OVERRIDES[key_path]
+        # Convert to expected type if specified
+        if expected_type is not None and not isinstance(value, expected_type):
+            try:
+                return expected_type(value)
+            except (ValueError, TypeError):
+                logger.warning(f"Could not convert '{key_path}' value to {expected_type.__name__}")
+                return value
+        return value
+    
+    # Otherwise get from the config
+    keys = key_path.split('.')
+    current = CONFIG
+    try:
+        for key in keys:
+            current = current[key]
+        
+        # Convert to expected type if specified
+        if expected_type is not None and not isinstance(current, expected_type):
+            try:
+                return expected_type(current)
+            except (ValueError, TypeError):
+                logger.warning(f"Could not convert '{key_path}' value to {expected_type.__name__}")
+        
+        return current
+    except (KeyError, TypeError):
+        return default
+
+# Add the HTTP endpoints
+def setup_http_transport(app):
+    # ... existing code ...
+
+    @app.post("/api/set_config")
+    async def api_set_config(request_data: dict):
+        """Set one or more configuration values dynamically."""
+        # Pass the entire request_data dictionary to the set_config tool
+        result = await set_config(request_data)
+        return result
+    
+    @app.get("/api/get_ai_rules")
+    async def api_get_ai_rules():
+        """
+        Get the AI rules file content.
+        
+        IMPORTANT: Reading these rules must be the first and foremost step before using this API.
+        """
+        return await get_ai_rules()
+    
+    # ... existing code ...
 
 # Start the server if run directly
 if __name__ == "__main__":

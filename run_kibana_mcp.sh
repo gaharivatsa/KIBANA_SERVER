@@ -91,8 +91,6 @@ AUTH_TOKEN=""
 # Stop any running servers
 echo "Stopping any running servers..."
 pkill -f "kibana_mcp_server.py" || true
-pkill -f "http_server.py" || true
-pkill -f "simple_server.py" || true
 
 # Setup Neurolink for AI features (optional)
 
@@ -100,22 +98,20 @@ pkill -f "simple_server.py" || true
 export KIBANA_AUTH_COOKIE="$AUTH_TOKEN"
 export PYTHONUNBUFFERED=1
 
-echo ""
-echo "🚀 Starting Kibana MCP Server with AI-powered analysis..."
-echo "📡 Server will be available at: http://localhost:8000"
-echo "🔍 Available endpoints:"
-echo "   • /api/search_logs - Search and filter logs"
-echo "   • /api/summarize_logs - 🧠 AI-powered log analysis"
-echo "   • /api/set_auth_token - Set authentication token"
-echo "   • /api/analyze_logs - Pattern analysis"
-echo "   • /api/extract_errors - Error extraction"
-echo ""
-echo "🔑 Authentication: Set token via POST to /api/set_auth_token"
-echo "🧠 AI Analysis: Use /api/summarize_logs for intelligent insights"
-echo ""
 
 # Run the MCP server with HTTP transport
-python kibana_mcp_server.py --transport http --host 0.0.0.0 --port 8000
 
-echo ""
-echo "Server exited. Check for errors above." 
+echo "paste the below content to use this tool as mcp"
+
+echo '
+  "kibana-logs": {
+    "command": "'"$(pwd)/KIBANA_ENV/bin/python"'",
+    "args": [
+      "'"$(pwd)/kibana_mcp_server.py"'",
+      "--transport", "stdio"
+    ],
+    "cwd": "'"$(pwd)"'"
+  }'
+
+echo "stop the server if using the tool as mcp"
+python kibana_mcp_server.py --transport http --host 0.0.0.0 --port 8000
