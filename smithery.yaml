@@ -1,0 +1,22 @@
+# Smithery configuration file: https://smithery.ai/docs/build/project-config
+
+env:
+  PORT: "8000"
+  PYTHONUNBUFFERED: "1"
+build:
+  dockerfile: Dockerfile
+  dockerBuildPath: .
+runtime: container
+startCommand:
+  type: http
+  configSchema:
+    # JSON Schema defining the configuration options for the MCP.
+    type: object
+    properties:
+      auth_token:
+        type: string
+        description: Kibana authentication token
+      kibana_host:
+        type: string
+        default: kibana.sso.mum.breeze.juspay.net
+        description: Elasticsearch/Kibana host URL
