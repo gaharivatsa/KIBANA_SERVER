@@ -93,7 +93,7 @@ ai_providers:
 
 # AI response configuration
 ai_response_settings:
-  max_tokens: 8000000  # Maximum tokens for AI responses
+  max_tokens: 1000000  # Maximum tokens for AI responses
   temperature: 0.2     # Lower temperature for more detailed and precise output
   detailed_mode: true  # Enable detailed mode for responses
   timeout_ms: 600000   # 10 minutes timeout in milliseconds 

@@ -224,8 +224,9 @@ The server will be available at http://localhost:8000
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
 | `query_text` | string | Text to search for in logs | - |
-| `start_time` | string | Start time for logs (ISO format or relative like '1h') | - |
-| `end_time` | string | End time for logs (ISO format) | - |
+| `time_filter` | string/array | **🆕 UNIFIED TIME PARAMETER** - Supports relative strings ("1h", "24h", "7d", "2w") or absolute time tuples (["2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z"]) | - |
+| `start_time` | string | ⚠️ **DEPRECATED** - Use `time_filter` instead (still supported for backward compatibility) | - |
+| `end_time` | string | ⚠️ **DEPRECATED** - Use `time_filter` instead (still supported for backward compatibility) | - |
 | `levels` | array | Log levels to include (e.g., ["error", "warn"]) | - |
 | `include_fields` | array | Fields to include in results | - |
 | `exclude_fields` | array | Fields to exclude from results | - |
@@ -233,20 +234,22 @@ The server will be available at http://localhost:8000
 | `sort_by` | string | Field to sort results by | "@timestamp" |
 | `sort_order` | string | Sort order ("asc" or "desc") | "desc" |
 
-> ⚠️ **Note**: Use `start_time` and `end_time` for time-based searches, not `time_range`.
+> 💡 **New**: Use the unified `time_filter` parameter for both relative time strings and absolute timestamp ranges. Legacy parameters are still supported for backward compatibility.
 
 #### `/api/analyze_logs` Parameters
 
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
-| `time_range` | string | Time range to analyze (e.g., "1h", "1d", "7d") | - |
+| `time_filter` | string/array | **🆕 UNIFIED TIME PARAMETER** - Supports relative strings ("1h", "24h", "7d", "2w") or absolute time tuples (["2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z"]) | - |
+| `time_range` | string | ⚠️ **DEPRECATED** - Use `time_filter` instead (still supported for backward compatibility) | - |
 | `group_by` | string | Field to group results by | "level" |
 
 #### `/api/extract_errors` Parameters
 
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
-| `hours` | integer | Number of hours to look back | 24 |
+| `time_filter` | string/array | **🆕 UNIFIED TIME PARAMETER** - Supports relative strings ("1h", "24h", "7d", "2w") or absolute time tuples (["2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z"]) | - |
+| `hours` | integer | ⚠️ **DEPRECATED** - Use `time_filter` instead (still supported for backward compatibility) | 24 |
 | `include_stack_traces` | boolean | Whether to include stack traces | true |
 | `limit` | integer | Maximum number of errors to return | 10 |
 
@@ -257,8 +260,9 @@ The server will be available at http://localhost:8000
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
 | `query_text` | string | Text to search for in logs | - |
-| `start_time` | string | Start time for logs (ISO format or relative like '1h') | - |
-| `end_time` | string | End time for logs (ISO format) | - |
+| `time_filter` | string/array | **🆕 UNIFIED TIME PARAMETER** - Supports relative strings ("1h", "24h", "7d", "2w") or absolute time tuples (["2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z"]) | - |
+| `start_time` | string | ⚠️ **DEPRECATED** - Use `time_filter` instead (still supported for backward compatibility) | - |
+| `end_time` | string | ⚠️ **DEPRECATED** - Use `time_filter` instead (still supported for backward compatibility) | - |
 | `levels` | array | Log levels to include (e.g., ["error", "warn"]) | - |
 | `include_fields` | array | Fields to include in results | - |
 | `exclude_fields` | array | Fields to exclude from results | - |
@@ -297,7 +301,7 @@ curl -X POST http://localhost:8000/api/search_logs \
   -H "Content-Type: application/json" \
   -d '{
     "query_text": "error",
-    "start_time": "1h",
+    "time_filter": "1h",
     "max_results": 20
   }'
 ```
@@ -363,7 +367,7 @@ curl -X POST http://localhost:8000/api/summarize_logs \
   -d '{
     "query_text": "error", 
     "max_results": 50,
-    "start_time": "1h"
+    "time_filter": "1h"
   }'
 ```
 
