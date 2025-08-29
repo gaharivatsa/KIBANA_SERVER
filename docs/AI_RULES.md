@@ -37,7 +37,7 @@
 4. **ALWAYS request `session_id` from the user , if not given ask whether can i use order id to get id and proceed . if yes then do so ** - this is required for all queries
 5. **ALWAYS include `session_id` in KQL queries** using format: `"{session_id} AND additional_query"`
 6. **ALWAYS use Kibana Query Language (KQL)** for all query formatting
-7. **ALWAYS use ISO format timestamps** (e.g., "2023-06-15T00:00:00Z") instead of relative time strings
+7. **Use unified time_filter parameter** - Supports both relative time strings (e.g., "1h", "24h", "7d", "2w") and absolute ISO timestamps (e.g., ["2023-06-15T00:00:00Z", "2023-06-16T00:00:00Z"])
 8. **Parse and present results clearly** in a structured format
 9. **dont use summarize_logs by yourself , use only when user asks for log summary  . 
 10. **Detect and use the right index** - allow users to discover and select the appropriate index for their company
@@ -175,8 +175,8 @@ this will be triggered by user saying search based on functions
 | `/api/search_logs` | **MAIN ENDPOINT** - Find specific logs | `query_text`, `max_results`, time filters |
 | `/api/extract_session_id` | **EXTRACT SESSION ID** - Get session ID from order ID | `order_id` |
 | `/api/get_recent_logs` | View latest logs | `count`, `level` |
-| `/api/analyze_logs` | Identify patterns | `time_range`, `group_by` |
-| `/api/extract_errors` | Find errors | `hours`, `include_stack_traces`, `limit` |
+| `/api/analyze_logs` | Identify patterns | `time_filter`, `group_by` |
+| `/api/extract_errors` | Find errors | `time_filter`, `include_stack_traces`, `limit` |
 
 | `/api/summarize_logs` | 🧠 **AI-POWERED** - Generate intelligent log analysis | Same as `search_logs` + AI analysis |
 | `/api/discover_indexes` | List available indexes | None |
@@ -188,7 +188,12 @@ this will be triggered by user saying search based on functions
 - `query_text`: String using KQL format - MUST include `{session_id}` + query terms
 - `max_results`: Integer (default: 100) - Number of results to return (adjust to your needs)
 ### Optional Parameters:
-- `start_time`/`end_time`: ISO timestamps (e.g., "2023-06-15T00:00:00Z")
+- `time_filter`: **🆕 UNIFIED TIME PARAMETER** - Supports both:
+  - **Relative time strings**: `"1h"`, `"24h"`, `"7d"`, `"2w"` (recommended for most use cases)
+  - **Absolute time tuples**: `["2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z"]` (for specific ranges)
+- `start_time`/`end_time`: ⚠️ **DEPRECATED** - Use `time_filter` instead (still supported for backward compatibility)
+- `time_range`: ⚠️ **DEPRECATED** - Use `time_filter` with relative string instead
+- `hours`: ⚠️ **DEPRECATED** - Use `time_filter` with relative string instead (e.g., `"12h"`)
 - `levels`: Array of log levels to include (e.g., ["ERROR", "WARN"])
 - `include_fields`/`exclude_fields`: Arrays of field names
 - `sort_by`: Field to sort by - MUST use a valid timestamp field name (`timestamp`, `@timestamp`, or `start_time`)
@@ -201,6 +206,153 @@ this will be triggered by user saying search based on functions
 "{session_id} AND verifyPaymentAttempt"
 "a71e84b1ee00f6247347 AND callStartPayment"
 ```
+
+## 🕰️ UNIFIED TIME PARAMETER SYSTEM
+
+The server now supports a **unified `time_filter` parameter** that standardizes time handling across **ALL endpoints** (`search_logs`, `analyze_logs`, `extract_errors`, `summarize_logs`). This replaces the previous inconsistent time parameters with a single, flexible approach.
+
+### 🆕 **New `time_filter` Parameter**
+
+**Type Definition**: `TimeFilter = Union[str, List[str]]`
+
+**Supports two formats:**
+
+1. **Relative Time Strings** (recommended for most use cases):
+   ```json
+   "time_filter": "1h"     # Last 1 hour
+   "time_filter": "24h"    # Last 24 hours  
+   "time_filter": "7d"     # Last 7 days
+   "time_filter": "2w"     # Last 2 weeks
+   ```
+   **Pattern**: `{number}{unit}` where unit is `h` (hours), `d` (days), or `w` (weeks)
+
+2. **Absolute Time Tuples** (for specific time ranges):
+   ```json
+   "time_filter": ["2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z"]
+   ```
+   **Requirements**: 
+   - Exactly 2 ISO timestamp strings in JSON array format
+   - Start time must be before end time
+   - Supports all timezone formats (Z, +00:00, -05:00, etc.)
+
+### 🔄 **Backward Compatibility & Migration**
+
+**Legacy parameters are still supported but DEPRECATED:**
+
+| Legacy Parameter | New Equivalent | Migration Example |
+|------------------|----------------|-------------------|
+| `start_time` + `end_time` | `time_filter` with tuple | `time_filter: ["2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z"]` |
+| `time_range: "1h"` | `time_filter: "1h"` | Direct replacement |
+| `hours: 24` | `time_filter: "24h"` | Convert number to string with "h" |
+
+**Priority Order** (when multiple parameters present):
+1. `time_filter` (takes priority if present)
+2. `start_time` + `end_time` 
+3. `time_range`
+4. `hours`
+5. Default: `"1d"` (last 24 hours)
+
+### 📝 **Updated Examples with time_filter**
+
+#### **1. Relative Time Examples (RECOMMENDED):**
+```bash
+# Last 1 hour of logs
+curl -X POST http://localhost:8000/api/search_logs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query_text": "{session_id} AND payment error",
+    "time_filter": "1h",
+    "max_results": 50
+  }'
+
+# Last 7 days for pattern analysis
+curl -X POST http://localhost:8000/api/analyze_logs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "time_filter": "7d",
+    "group_by": "level"
+  }'
+
+# Extract errors from last 24 hours
+curl -X POST http://localhost:8000/api/extract_errors \
+  -H "Content-Type: application/json" \
+  -d '{
+    "time_filter": "24h",
+    "include_stack_traces": true,
+    "limit": 10
+  }'
+```
+
+#### **2. Absolute Time Examples:**
+```bash
+# Specific time range for incident investigation
+curl -X POST http://localhost:8000/api/search_logs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query_text": "{session_id} AND payment",
+    "time_filter": ["2024-01-15T10:00:00Z", "2024-01-15T14:00:00Z"],
+    "max_results": 100
+  }'
+
+# AI analysis for specific incident window
+curl -X POST http://localhost:8000/api/summarize_logs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query_text": "{session_id} AND error",
+    "time_filter": ["2024-01-15T09:30:00Z", "2024-01-15T10:30:00Z"],
+    "max_results": 200
+  }'
+```
+
+#### **3. Legacy Support Examples (DEPRECATED but still works):**
+```bash
+# Legacy start_time/end_time (still works)
+curl -X POST http://localhost:8000/api/search_logs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query_text": "{session_id} AND payment",
+    "start_time": "2024-01-15T10:00:00Z",
+    "end_time": "2024-01-15T14:00:00Z"
+  }'
+
+# Legacy hours parameter (still works)
+curl -X POST http://localhost:8000/api/extract_errors \
+  -H "Content-Type: application/json" \
+  -d '{
+    "hours": 24,
+    "include_stack_traces": true
+  }'
+```
+
+### ⚠️ **Validation & Error Handling**
+
+The unified system includes comprehensive validation:
+
+**Valid Examples:**
+- ✅ `"time_filter": "1h"` - 1 hour
+- ✅ `"time_filter": "24h"` - 24 hours  
+- ✅ `"time_filter": "7d"` - 7 days
+- ✅ `"time_filter": "2w"` - 2 weeks
+- ✅ `"time_filter": ["2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z"]`
+
+**Invalid Examples (will return clear error messages):**
+- ❌ `"time_filter": "1x"` - Invalid unit (only h/d/w allowed)
+- ❌ `"time_filter": "invalid"` - Invalid format
+- ❌ `"time_filter": ["single_element"]` - Must have exactly 2 timestamps
+- ❌ `"time_filter": ["invalid", "timestamps"]` - Must be valid ISO timestamps
+- ❌ `"time_filter": ["2024-01-02T00:00:00Z", "2024-01-01T00:00:00Z"]` - Start must be before end
+
+### 📋 **Updated Endpoint Specifications**
+
+All time-aware endpoints now support the unified `time_filter`:
+
+| Endpoint | time_filter Support | Legacy Parameters Still Work |
+|----------|-------------------|------------------------------|
+| `search_logs` | ✅ Full support | ✅ start_time, end_time |
+| `analyze_logs` | ✅ Full support | ✅ time_range |
+| `extract_errors` | ✅ Full support | ✅ hours |
+| `summarize_logs` | ✅ Full support | ✅ start_time, end_time |
+| `get_recent_logs` | ➖ Uses count parameter | ➖ N/A |
 
 ### Complete Examples:
 
@@ -262,7 +414,7 @@ curl -X POST http://localhost:8000/api/extract_session_id \
 curl -X POST http://localhost:8000/api/analyze_logs \
   -H "Content-Type: application/json" \
   -d '{
-    "time_range": "24h",
+    "time_filter": "24h",
     "group_by": "level"
   }'
 ```
@@ -367,7 +519,3 @@ curl -X POST http://localhost:8000/api/search_logs \
     "sort_order": "desc"
   }'
 ```
-
-
-
-
