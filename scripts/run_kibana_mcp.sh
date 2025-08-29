@@ -114,4 +114,13 @@ echo '
   }'
 
 echo "stop the server if using the tool as mcp"
-python kibana_mcp_server.py --transport http --host 0.0.0.0 --port 8000
+
+# Activate virtual environment and run the MCP server with HTTP transport
+source venv/bin/activate
+
+# Run the server
+echo "Starting Kibana MCP server with HTTP transport on http://localhost:8000"
+python -m src.server --transport http --host localhost --port 8000
+
+echo ""
+echo "Server exited. Check for errors above." 
