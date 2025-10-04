@@ -2,6 +2,7 @@
 
 [![Python 3.8+](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
+[![smithery badge](https://smithery.ai/badge/@gaharivatsa/kibana_server)](https://smithery.ai/server/@gaharivatsa/kibana_server)
 
 > A powerful server that provides seamless access to Kibana logs through a convenient API, designed to work with Machine Control Protocol (MCP) and a standard HTTP interface.
 
@@ -53,6 +54,16 @@ This project bridges the gap between your applications and Kibana logs by provid
 - Kibana authentication token
 
 ### Installation
+
+#### Installing via Smithery
+
+To install Kibana Log Access Server for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@gaharivatsa/kibana_server):
+
+```bash
+npx -y @smithery/cli install @gaharivatsa/kibana_server --client claude
+```
+
+#### Installing Manually
 
 1. Clone this repository:
    ```bash
