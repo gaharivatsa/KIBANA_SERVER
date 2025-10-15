@@ -8,7 +8,6 @@ from .sanitizers import (
     sanitize_stream_name,
     sanitize_error_code_pattern,
     sanitize_sql_identifier,
-    VALID_STREAM_NAMES,
 )
 from .auth import AuthManager, auth_manager, AUTH_CONTEXT_KIBANA, AUTH_CONTEXT_PERISCOPE
 from .validators import QueryValidator
@@ -18,7 +17,6 @@ __all__ = [
     "sanitize_stream_name",
     "sanitize_error_code_pattern",
     "sanitize_sql_identifier",
-    "VALID_STREAM_NAMES",
     "AuthManager",
     "auth_manager",
     "AUTH_CONTEXT_KIBANA",

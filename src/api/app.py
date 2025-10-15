@@ -12,7 +12,7 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from src.core.constants import APP_NAME, APP_VERSION, APP_DESCRIPTION
 from src.core.exceptions import KibanaMCPException
-from src.api.http import router as http_router
+from src.api.http.routes import router as http_router, memory_router
 from src.observability.tracing import setup_tracing
 
 
@@ -71,6 +71,7 @@ def create_app() -> FastAPI:
 
     # Include routers
     app.include_router(http_router, prefix="/api")
+    app.include_router(memory_router)
 
     # Instrument FastAPI app for OpenTelemetry
     FastAPIInstrumentor.instrument_app(app)

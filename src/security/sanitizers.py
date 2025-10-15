@@ -8,7 +8,6 @@ for Periscope SQL queries where direct SQL injection is possible.
 """
 
 import re
-from typing import Set
 
 
 class ValidationError(Exception):
@@ -16,25 +15,12 @@ class ValidationError(Exception):
     pass
 
 
-# Whitelist of allowed Periscope stream names
-# Only these stream names are permitted in SQL queries
-VALID_STREAM_NAMES: Set[str] = {
-    'envoy_logs',
-    'vayu_logs',
-    'breeze_logs',
-    'lighthouse_logs',
-    'nimble_logs',
-    'istio_logs',
-    'squid_logs',
-}
-
-
 def sanitize_stream_name(stream: str) -> str:
     """
-    Validate stream name against whitelist.
+    Validate and sanitize Periscope stream name.
 
-    Prevents SQL injection via stream name parameter.
-    This is the PRIMARY defense against SQL injection in Periscope queries.
+    Prevents SQL injection via stream name parameter using pattern validation.
+    This is GENERIC and works with any customer's stream names.
 
     Args:
         stream: Stream name from user input
@@ -43,21 +29,37 @@ def sanitize_stream_name(stream: str) -> str:
         Validated stream name (same as input if valid)
 
     Raises:
-        ValidationError: If stream name not in whitelist
+        ValidationError: If stream name contains invalid characters
+
+    Security:
+        - Only allows alphanumeric characters, underscores, and hyphens
+        - Prevents SQL injection attempts
+        - No hardcoded whitelist (works for all customers)
 
     Example:
         >>> sanitize_stream_name("envoy_logs")
         'envoy_logs'
+        >>> sanitize_stream_name("customer_app_logs")
+        'customer_app_logs'
         >>> sanitize_stream_name("malicious'; DROP TABLE logs; --")
-        ValidationError: Invalid stream name
+        ValidationError: Invalid stream name format
     """
     if not stream:
         raise ValidationError("Stream name cannot be empty")
 
-    if stream not in VALID_STREAM_NAMES:
+    # Generic validation: only allow safe SQL identifier characters
+    # This works for ANY customer's stream names while preventing injection
+    if not re.match(r'^[a-zA-Z0-9_-]+$', stream):
         raise ValidationError(
-            f"Invalid stream name: '{stream}'. "
-            f"Allowed streams: {', '.join(sorted(VALID_STREAM_NAMES))}"
+            f"Invalid stream name format: '{stream}'. "
+            "Only alphanumeric characters, underscores, and hyphens are allowed."
+        )
+
+    # Limit length to prevent DoS
+    if len(stream) > 100:
+        raise ValidationError(
+            f"Stream name too long: {len(stream)} characters. "
+            "Maximum allowed: 100 characters."
         )
 
     return stream

@@ -56,16 +56,9 @@ MAX_ORDER_ID_LENGTH = 100
 MAX_INDEX_PATTERN_LENGTH = 100
 MAX_FIELD_NAME_LENGTH = 100
 
-# Periscope stream names (whitelist)
-VALID_PERISCOPE_STREAMS = {
-    'envoy_logs',
-    'vayu_logs',
-    'breeze_logs',
-    'lighthouse_logs',
-    'nimble_logs',
-    'istio_logs',
-    'squid_logs',
-}
+# Periscope stream names - No hardcoded list (generic for all companies)
+# Stream name validation happens via SQL identifier sanitization
+# This allows any customer's stream names while preventing SQL injection
 
 # KQL and SQL dangerous keywords
 DANGEROUS_SQL_KEYWORDS = [

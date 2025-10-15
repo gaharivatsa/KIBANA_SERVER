@@ -19,6 +19,8 @@ from src.models.requests import (
     SetConfigRequest,
     PeriscopeSearchRequest,
     PeriscopeErrorsRequest,
+    CreateBoardRequest,
+    AddFindingRequest,
 )
 from src.models.responses import (
     HealthResponse,
@@ -28,6 +30,7 @@ from src.models.responses import (
 from src.services.log_service import log_service
 from src.services.session_service import session_service
 from src.services.index_service import index_service
+from src.services.memory_service import MemoryService
 from src.security.auth import auth_manager, AUTH_CONTEXT_KIBANA, AUTH_CONTEXT_PERISCOPE
 from src.security.rate_limiter import search_rate_limiter, auth_rate_limiter, config_rate_limiter
 from src.core.config import config
@@ -355,3 +358,46 @@ async def get_all_periscope_schemas(org_identifier: str = "default"):
         "count": len(all_schemas),
         "message": f"Retrieved schemas for {len(all_schemas)} streams"
     }
+
+
+# ===== Memory Board Endpoints =====
+
+memory_router = APIRouter(prefix="/api/memory", tags=["Memory Board"])
+memory_service = MemoryService()
+
+@memory_router.get("/all")
+def get_all_board_summaries():
+    """Gets a summary list (ID and name) of all active memory boards."""
+    return memory_service.list_all_boards()
+
+@memory_router.post("/create")
+def create_new_memory_board(request: CreateBoardRequest):
+    """Creates a new, uniquely named memory board."""
+    return memory_service.create_board(name=request.name)
+
+@memory_router.post("/{board_id}/add_finding")
+def add_finding_to_board(board_id: str, finding: AddFindingRequest):
+    """Adds a finding to the specified memory board."""
+    return memory_service.add_finding(board_id, finding.dict())
+
+@memory_router.get("/{board_id}")
+def get_memory_board(board_id: str):
+    """Gets the current board for a given ID."""
+    board = memory_service.get_board(board_id)
+    if not board:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Memory board with ID '{board_id}' not found."
+        )
+    return {"board_id": board_id, **board}
+
+@memory_router.post("/{board_id}/clear")
+def clear_memory_board(board_id: str):
+    """Clears and removes a memory board."""
+    result = memory_service.clear_board(board_id)
+    if result.get("status") == "not_found":
+         raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Memory board with ID '{board_id}' not found."
+        )
+    return result

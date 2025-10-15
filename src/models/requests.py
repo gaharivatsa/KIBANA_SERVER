@@ -4,7 +4,7 @@ Request Models
 Pydantic models for API request validation.
 """
 
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from datetime import datetime
 
@@ -336,3 +336,47 @@ class PeriscopeErrorsRequest(BaseModel):
             from src.security.sanitizers import sanitize_error_code_pattern
             return sanitize_error_code_pattern(v)
         return v
+
+
+# Memory Board Models
+
+class CreateBoardRequest(BaseModel):
+    """Request model for creating a new memory board."""
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str = Field(
+        ...,
+        description="A descriptive name for the memory board/investigation.",
+        min_length=3,
+        max_length=150
+    )
+
+
+class AddFindingRequest(BaseModel):
+    """Request model for adding a finding to a memory board."""
+    timestamp: datetime = Field(
+        ...,
+        description="The timestamp of the event related to the finding."
+    )
+    finding: str = Field(
+        ...,
+        description="A concise, human-readable summary of the discovery.",
+        min_length=3,
+        max_length=1000
+    )
+    source_log: Dict[str, Any] = Field(
+        ...,
+        description="The raw log entry that led to this finding."
+    )
+    attention_weight: int = Field(
+        ...,
+        description="The AI's assessment of how critical this finding is (1-10).",
+        ge=1,
+        le=10
+    )
+    implication: str = Field(
+        ...,
+        description="The AI's deduction based on the finding.",
+        min_length=3,
+        max_length=1000
+    )
