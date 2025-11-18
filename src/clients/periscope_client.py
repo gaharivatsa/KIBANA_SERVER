@@ -209,7 +209,9 @@ class PeriscopeClient:
                 end_micros = int(time.time() * 1_000_000)
 
             # Get Periscope host from config
-            periscope_host = config.get('periscope.host', default='periscope.breezesdk.store')
+            periscope_host = config.get('periscope.host')
+            if not periscope_host:
+                raise PeriscopeAPIError("Periscope host not configured")
 
             # Build URL - using legacy server format
             url = f"https://{periscope_host}/api/{org_identifier}/_search?type=logs&search_type=ui&use_cache=true"
@@ -248,8 +250,11 @@ class PeriscopeClient:
             cookies = {"auth_tokens": auth_token}
 
             # Execute with retry
+            # Get timeout from config (default 120 seconds for Periscope)
+            timeout = config.get('timeouts.periscope_request_timeout', default=120, expected_type=int)
+
             async def _execute_search():
-                async with http_manager.get_client() as client:
+                async with http_manager.get_client(timeout=timeout) as client:
                     response = await client.post(
                         url,
                         json=payload,
@@ -358,7 +363,9 @@ class PeriscopeClient:
                 raise AuthenticationError("No Periscope auth token available")
 
             # Get Periscope host from config
-            periscope_host = config.get('periscope.host', default='periscope.breezesdk.store')
+            periscope_host = config.get('periscope.host')
+            if not periscope_host:
+                raise PeriscopeAPIError("Periscope host not configured")
 
             # Build URL - using legacy server format
             url = f"https://{periscope_host}/api/{org_identifier}/streams?type=logs"
@@ -370,7 +377,10 @@ class PeriscopeClient:
             # Use cookie-based auth
             cookies = {"auth_tokens": auth_token}
 
-            async with http_manager.get_client() as client:
+            # Get timeout from config
+            timeout = config.get('timeouts.periscope_request_timeout', default=120, expected_type=int)
+
+            async with http_manager.get_client(timeout=timeout) as client:
                 response = await client.get(url, headers=headers, cookies=cookies)
 
                 if response.status_code == 200:
@@ -418,7 +428,9 @@ class PeriscopeClient:
                 raise AuthenticationError("No Periscope auth token available")
 
             # Get Periscope host from config
-            periscope_host = config.get('periscope.host', default='periscope.breezesdk.store')
+            periscope_host = config.get('periscope.host')
+            if not periscope_host:
+                raise PeriscopeAPIError("Periscope host not configured")
 
             # Build URL - using legacy server format
             url = f"https://{periscope_host}/api/{org_identifier}/streams/{stream_name}/schema?type=logs"
@@ -430,7 +442,10 @@ class PeriscopeClient:
             # Use cookie-based auth
             cookies = {"auth_tokens": auth_token}
 
-            async with http_manager.get_client() as client:
+            # Get timeout from config
+            timeout = config.get('timeouts.periscope_request_timeout', default=120, expected_type=int)
+
+            async with http_manager.get_client(timeout=timeout) as client:
                 response = await client.get(url, headers=headers, cookies=cookies)
 
                 if response.status_code == 200:

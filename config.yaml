@@ -62,13 +62,9 @@ logging:
 
 # Periscope Configuration (optional - only needed if using Periscope)
 periscope:
-  # Periscope host (e.g., "periscope.example.com")
-  # Used in: src/clients/periscope_client.py
-  # Default: "periscope.breezesdk.store"
   host: ""
 
 # Timeout Configuration
 timeouts:
-  # Kibana request timeout (in seconds)
-  # Used in: src/services/log_service.py
-  kibana_request_timeout: 30
+  kibana_request_timeout: 60
+  periscope_request_timeout: 120

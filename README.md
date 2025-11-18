@@ -161,7 +161,7 @@ mcp_server:
   log_level: "info"
 
 periscope:
-  host: ""  # Default: periscope.breezesdk.store
+  host: ""
 
 timeouts:
   kibana_request_timeout: 30

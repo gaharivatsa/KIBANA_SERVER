@@ -680,6 +680,20 @@ curl -X GET http://localhost:8000/api/get_all_periscope_schemas
 4. **Default Org:** Most queries use `org_identifier: "default"` unless specified
 5. **Field Names:** Check schema first to know available fields and types
 6. **Escaping:** In curl commands with bash, escape single quotes as `'\''`
+7. **🚨 CRITICAL: Leading Spaces in `vayu_logs` Fields** - All field values in `vayu_logs` stream have leading spaces:
+   ```json
+   {
+     "session_id": " _58ZElUxpcb86PNSbUjnZ",  // Note the space before underscore!
+     "device_id": " hX5GdI0KqkTS5FDonNZPB",   // Space before 'h'
+     "shop_url": " https://5d818d.myshopify.com"  // Space before 'h'
+   }
+   ```
+   **Impact:** Exact match queries will fail if you don't include the leading space:
+   - ❌ Wrong: `WHERE session_id = 'jxz6F5eKlFjs2yrxD18h2'` (returns 0 results)
+   - ✅ Correct: `WHERE session_id = ' jxz6F5eKlFjs2yrxD18h2'` (note the space after opening quote)
+
+   **Workaround:** Use LIKE with wildcards if uncertain: `WHERE session_id LIKE '%jxz6F5eKlFjs2yrxD18h2%'`
+   (Warning: LIKE queries are slower on large datasets)
 
 ### 🧪 Testing Your Setup
 

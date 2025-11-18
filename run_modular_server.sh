@@ -78,23 +78,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Check if virtual environment exists
-if [ ! -d "$VENV_DIR" ]; then
-    echo -e "${RED}❌ Virtual environment not found: $VENV_DIR${NC}"
-    echo -e "${YELLOW}💡 Run ./setup_dev.sh to set up the environment${NC}"
-    exit 1
-fi
-
 # Check if main.py exists
 if [ ! -f "main.py" ]; then
     echo -e "${RED}❌ main.py not found${NC}"
     echo "Make sure you're running this script from the project root directory"
     exit 1
 fi
-
-# Activate virtual environment
-echo -e "${BLUE}🔧 Activating virtual environment: $VENV_DIR${NC}"
-source "$VENV_DIR/bin/activate"
 
 # Check if required packages are installed
 echo -e "${BLUE}📦 Checking dependencies...${NC}"

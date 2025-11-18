@@ -14,7 +14,7 @@ from src.core.constants import APP_NAME, APP_VERSION
 
 def setup_tracing():
     """Initializes the OpenTelemetry tracer."""
-    
+
     # Create a resource to identify our application
     resource = Resource(attributes={
         "service.name": APP_NAME,
@@ -28,12 +28,12 @@ def setup_tracing():
     # For development, we can use a console exporter.
     # For production, this would be configured to point to a real collector like Jaeger or Datadog.
     # Example using OTLP (OpenTelemetry Protocol) Exporter:
-    exporter = OTLPSpanExporter(endpoint="http://localhost:4318/v1/traces")
-    
-    processor = BatchSpanProcessor(exporter)
-    trace.get_tracer_provider().add_span_processor(processor)
+    # DISABLED: No collector running on localhost:4318
+    # exporter = OTLPSpanExporter(endpoint="http://localhost:4318/v1/traces")
+    # processor = BatchSpanProcessor(exporter)
+    # trace.get_tracer_provider().add_span_processor(processor)
 
-    logger.info("OpenTelemetry tracing initialized.")
+    logger.info("OpenTelemetry tracing initialized (exporter disabled).")
 
 def get_tracer(name: str):
     """Gets a tracer instance for a specific module."""
