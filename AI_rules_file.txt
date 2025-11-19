@@ -2,9 +2,24 @@
 
 
 ## 🚨 MANDATORY REQUIREMENTS
-1. **SETUP DYNAMIC CONFIGURATION (FIRST STEP - MANDATORY IF DEFAULTS ARE NOT SUITABLE)**
+
+### 📋 STEP 0: INITIAL USER INTERACTION (FIRST STEP - ALWAYS REQUIRED)
+1. **ASK USER: "Do you want to debug using Periscope or Kibana?"**
+   - This determines which workflow to follow
+   - User response will branch to either Periscope or Kibana workflow
+   - **CRITICAL:** Wait for user response before proceeding
+
+2. **CREATE MEMORY BOARD (MANDATORY SECOND STEP)**
+   - **Before any analysis**, create an investigation board: `POST /api/memory/create`
+   - Name it descriptively: `{"name": "RCA: [Issue Description]"}`
+   - Store the returned `board_id` for the entire session
+   - **Use this board throughout** to track findings, critical points, patterns
+   - Check board when needed: `GET /api/memory/{board_id}` for context
+
+### 🔧 CONFIGURATION SETUP (IF DEFAULTS NOT SUITABLE)
+3. **SETUP DYNAMIC CONFIGURATION (OPTIONAL)**
    - Before proceeding to any other steps, if the default server configurations are not suitable for the user's environment or task, you MUST use the `/api/set_config` endpoint to adjust them.
-   - SAY TO USER WHAT ALL CONFIGS TO SET 
+   - SAY TO USER WHAT ALL CONFIGS TO SET
    - This allows tailoring the server's behavior (e.g., target Kibana instance, log processing parameters) without manual `config.yaml` edits or server restarts.
    - **Endpoint:** `POST /api/set_config`
    - **Request Body Example:**
@@ -30,17 +45,18 @@
      - `ai_providers.google_ai_api_key`: string - e.g., "AIza..." (Set Google AI API key; **Caution: handle API keys securely**)
      - `ai_providers.openai_api_key`: string - e.g., "sk-..." (Set OpenAI API key; **Caution: handle API keys securely**)
    - **Note:** Only set these if you understand their impact or if instructed by the user. Incorrect values might lead to errors. The server will use values from `config.yaml` if not dynamically overridden.
-2. **Set auth token first** before using any other endpoint
-3. **NEXT ask user which index to use** - after setting auth token but before asking for session ID
-   - If user asks to "get index" or "show indexes", call discover_indexes
-   - Have user select an index using set_current_index before proceeding
-4. **ALWAYS request `session_id` from the user , if not given ask whether can i use order id to get id and proceed . if yes then do so ** - this is required for all queries
-5. **ALWAYS include `session_id` in KQL queries** using format: `"{session_id} AND additional_query"`
-6. **ALWAYS use Kibana Query Language (KQL)** for all query formatting
-7. **ALWAYS use ISO format timestamps** (e.g., "2023-06-15T00:00:00Z") instead of relative time strings
+
+### 📌 GENERAL REQUIREMENTS
+4. **ALWAYS request `session_id` from the user, if not given ask whether can i use order id to get id and proceed. if yes then do so** - this is required for all queries
+5. **ALWAYS include `session_id` in queries** using appropriate format (KQL for Kibana, SQL for Periscope)
+6. **ALWAYS use correct query language:**
+   - **Kibana:** KQL (Kibana Query Language)
+   - **Periscope:** SQL with special functions like `match_all()`
+7. **ALWAYS use ISO format timestamps** (e.g., "2023-06-15T00:00:00Z") or relative time strings ("24h", "7d")
 8. **Parse and present results clearly** in a structured format
-9. **dont use summarize_logs by yourself , use only when user asks for log summary  . 
-10. **Detect and use the right index** - allow users to discover and select the appropriate index for their company
+9. **dont use summarize_logs by yourself, use only when user asks for log summary**
+10. **Add findings to memory board** as you discover them throughout the investigation
+11. **Check memory board** when you need context or want to track progress
 
 
 
@@ -367,18 +383,135 @@ curl -X POST http://localhost:8000/api/summarize_logs \
 
 ## 🔄 AI DECISION FLOW
 
-1. **Set auth token** (if not already set)
-2. **Ask which index to use** and call discover_indexes if needed
-3. **Request `session_id` from user** (if not provided)
-4. **Determine appropriate endpoint** based on user intent:
-   - For specific searches → `search_logs`
-   - For recent errors → `get_recent_logs` or `extract_errors`
-   - For pattern analysis → `analyze_logs`
-   - **For intelligent analysis/insights → `summarize_logs` (AI-powered)**
-4. **Construct query** using KQL format: `"{session_id} AND <query terms>"`
-5. **Select appropriate parameters** (time range, result limits, etc.)
-6. **Execute request** using the curl command
-7. **Parse and present results** in a clear, structured format
+### STEP 1: INITIAL SETUP
+1. **Ask user: "Do you want to debug using Periscope or Kibana?"**
+   - Wait for user's choice before proceeding
+
+2. **Create Memory Board (MANDATORY)**
+   ```bash
+   curl -X POST http://localhost:8000/api/memory/create \
+     -H "Content-Type: application/json" \
+     -d '{"name": "RCA: [Issue Description]"}'
+   ```
+   - Store the returned `board_id` for the entire session
+
+### STEP 2: BRANCH BASED ON USER CHOICE
+
+#### 🔵 IF USER CHOOSES KIBANA:
+
+3. **Set Kibana Auth Token**
+   ```bash
+   curl -X POST http://localhost:8000/api/set_auth_token \
+     -H "Content-Type: application/json" \
+     -d '{"auth_token":"USER_TOKEN"}'
+   ```
+
+4. **Discover Available Indexes**
+   ```bash
+   curl -X GET http://localhost:8000/api/discover_indexes
+   ```
+
+5. **Ask user which index to use** (based on discovered indexes)
+
+6. **Set the selected index**
+   ```bash
+   curl -X POST http://localhost:8000/api/set_current_index \
+     -H "Content-Type: application/json" \
+     -d '{"index_pattern": "USER_SELECTED_INDEX"}'
+   ```
+
+7. **Request `session_id` from user** (if not provided, offer to extract from order_id)
+
+8. **Search logs using KQL**
+   ```bash
+   curl -X POST http://localhost:8000/api/search_logs \
+     -H "Content-Type: application/json" \
+     -d '{
+       "query_text": "{session_id} AND <query terms>",
+       "max_results": 200,
+       "sort_order": "asc"
+     }'
+   ```
+
+9. **Add findings to memory board as you discover them**
+   ```bash
+   curl -X POST http://localhost:8000/api/memory/{board_id}/add_finding \
+     -H "Content-Type: application/json" \
+     -d '{
+       "finding": "Description of finding",
+       "attention_weight": 8,
+       "implication": "What this means"
+     }'
+   ```
+
+#### 🟢 IF USER CHOOSES PERISCOPE:
+
+3. **Set Periscope Auth Token**
+   ```bash
+   curl -X POST http://localhost:8000/api/set_periscope_auth_token \
+     -H "Content-Type: application/json" \
+     -d '{"auth_token":"USER_PERISCOPE_TOKEN"}'
+   ```
+
+4. **Discover Available Streams**
+   ```bash
+   curl -X GET http://localhost:8000/api/get_periscope_streams
+   ```
+
+5. **Ask user which stream to use** (e.g., vayu_logs, envoy_logs, etc.)
+
+6. **Get schema of selected stream (CRITICAL - USE THIS KNOWLEDGE)**
+   ```bash
+   curl -X POST http://localhost:8000/api/get_periscope_stream_schema \
+     -H "Content-Type: application/json" \
+     -d '{"stream_name": "USER_SELECTED_STREAM"}'
+   ```
+   - **Study the schema:** field names, types, available columns
+   - **Use this knowledge** when constructing SQL queries
+
+7. **Request `session_id` from user** (if not provided, offer to extract from order_id)
+
+8. **Search logs using SQL with `match_all()` for robustness**
+   ```bash
+   curl -X POST http://localhost:8000/api/search_periscope_logs \
+     -H "Content-Type: application/json" \
+     -d '{
+       "sql_query": "SELECT * FROM \"stream_name\" WHERE match_all('\''session_id'\'') ORDER BY _timestamp ASC",
+       "start_time": "7d",
+       "max_results": 200
+     }'
+   ```
+   - **IMPORTANT:** Use `match_all()` function for session_id searches (handles leading spaces)
+   - Alternative: Use `WHERE session_id = ' SESSION_ID'` (note the leading space)
+   - See "PERISCOPE QUERY METHODS" section below for details
+
+9. **Add findings to memory board as you discover them**
+   ```bash
+   curl -X POST http://localhost:8000/api/memory/{board_id}/add_finding \
+     -H "Content-Type: application/json" \
+     -d '{
+       "finding": "Description of finding",
+       "attention_weight": 8,
+       "implication": "What this means"
+     }'
+   ```
+
+### STEP 3: THROUGHOUT INVESTIGATION
+
+10. **Check memory board when needed** for context and progress tracking
+    ```bash
+    curl -X GET http://localhost:8000/api/memory/{board_id}
+    ```
+
+11. **Continue adding findings** as you discover:
+    - Errors and exceptions
+    - Critical log entries
+    - Patterns and anomalies
+    - Key business events
+    - Performance issues
+    - Any insights that help RCA
+
+12. **Present results** in a clear, structured format to the user
 
 ## 🔭 PERISCOPE INTEGRATION - SQL-BASED LOG ANALYSIS
 
@@ -565,6 +698,106 @@ curl -X POST http://localhost:8000/api/search_periscope_logs \
 - All conversions result in UTC microseconds internally
 - The `_timestamp` field in logs may be in local server time (check your specific logs)
 
+### 🔍 PERISCOPE QUERY METHODS (CRITICAL)
+
+**⚠️ IMPORTANT: `match_all()` is PERISCOPE-ONLY, NOT for Kibana!**
+
+#### Problem: Leading Spaces in Field Values
+
+Many Periscope streams (especially `vayu_logs`) have **leading spaces** in field values:
+
+```json
+{
+  "session_id": " McErP7Cg2jG8X_Slg2foh",  // Note the space before 'M'!
+  "device_id": " h2-BsSfwasVTRHUnAOdwo",   // Space before 'h'
+  "shop_url": " https://artociti.myshopify.com"  // Space before 'h'
+}
+```
+
+This causes **direct equality queries to fail**:
+```sql
+-- ❌ FAILS: Returns 0 results
+WHERE session_id = 'McErP7Cg2jG8X_Slg2foh'
+```
+
+#### 3 Solutions (Tested & Verified)
+
+All three methods below successfully return **2,016 logs** for test session `McErP7Cg2jG8X_Slg2foh`:
+
+**Method 1: Include Leading Space (FASTEST)**
+```sql
+SELECT * FROM "vayu_logs" WHERE session_id = ' McErP7Cg2jG8X_Slg2foh'
+                                                 ↑ Note the space after quote!
+```
+- ✅ **Pros:** Fastest performance, exact match
+- ❌ **Cons:** Must remember to add space, not obvious from error messages
+- **Use when:** You know the field has leading spaces
+
+**Method 2: Use LIKE Wildcard**
+```sql
+SELECT * FROM "vayu_logs" WHERE session_id LIKE '%McErP7Cg2jG8X_Slg2foh%'
+```
+- ✅ **Pros:** Handles any whitespace, works without knowing exact format
+- ❌ **Cons:** Slower on large datasets (full scan), may match partial IDs
+- **Use when:** Uncertain about whitespace, small datasets, debugging
+
+**Method 3: Use match_all() Full-Text Search (RECOMMENDED)**
+```sql
+SELECT * FROM "vayu_logs" WHERE match_all('McErP7Cg2jG8X_Slg2foh')
+```
+- ✅ **Pros:** Robust, searches across ALL fields, handles whitespace
+- ✅ **Pros:** More forgiving, good for exploratory searches
+- ⚠️ **Cons:** Searches all fields (may match unintended data), slightly slower than Method 1
+- **Use when:** Not sure which field contains the value, want maximum coverage
+
+#### Performance Comparison
+
+| Method | Query Time | Results | Best For |
+|--------|-----------|---------|----------|
+| **1. With space** | ~26s | 2,016 | Known field, exact match |
+| **2. LIKE** | ~30s | 2,016 | Uncertain whitespace |
+| **3. match_all()** | ~29s | 2,016 | **Exploratory search, maximum robustness** |
+
+#### Recommendation
+
+**For session_id queries:**
+1. **First try:** `match_all('SESSION_ID')` (most robust, works across fields)
+2. **If you need speed:** `session_id = ' SESSION_ID'` (with leading space)
+3. **For debugging:** `session_id LIKE '%SESSION_ID%'` (handles any format)
+
+#### Complete Examples
+
+```bash
+# Method 1: With leading space
+curl -X POST http://localhost:8000/api/search_periscope_logs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sql_query": "SELECT * FROM \"vayu_logs\" WHERE session_id = '\'' McErP7Cg2jG8X_Slg2foh'\'' ORDER BY _timestamp ASC",
+    "start_time": "7d",
+    "max_results": 200
+  }'
+
+# Method 2: Using LIKE
+curl -X POST http://localhost:8000/api/search_periscope_logs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sql_query": "SELECT * FROM \"vayu_logs\" WHERE session_id LIKE '\''%McErP7Cg2jG8X_Slg2foh%'\''",
+    "start_time": "7d",
+    "max_results": 200
+  }'
+
+# Method 3: Using match_all() (RECOMMENDED)
+curl -X POST http://localhost:8000/api/search_periscope_logs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sql_query": "SELECT * FROM \"vayu_logs\" WHERE match_all('\''McErP7Cg2jG8X_Slg2foh'\'') ORDER BY _timestamp ASC",
+    "start_time": "7d",
+    "max_results": 200
+  }'
+```
+
+**Remember:** `match_all()` is a **Periscope-specific** SQL function. Do NOT use it with Kibana/Elasticsearch (use KQL instead).
+
 ### 🔴 Finding Errors - Convenience Function
 
 For quickly finding 4xx/5xx errors:
@@ -690,10 +923,11 @@ curl -X GET http://localhost:8000/api/get_all_periscope_schemas
    ```
    **Impact:** Exact match queries will fail if you don't include the leading space:
    - ❌ Wrong: `WHERE session_id = 'jxz6F5eKlFjs2yrxD18h2'` (returns 0 results)
-   - ✅ Correct: `WHERE session_id = ' jxz6F5eKlFjs2yrxD18h2'` (note the space after opening quote)
+   - ✅ Correct Option 1: `WHERE session_id = ' jxz6F5eKlFjs2yrxD18h2'` (with leading space)
+   - ✅ Correct Option 2: `WHERE session_id LIKE '%jxz6F5eKlFjs2yrxD18h2%'` (wildcard)
+   - ✅ Correct Option 3: `WHERE match_all('jxz6F5eKlFjs2yrxD18h2')` (RECOMMENDED - most robust)
 
-   **Workaround:** Use LIKE with wildcards if uncertain: `WHERE session_id LIKE '%jxz6F5eKlFjs2yrxD18h2%'`
-   (Warning: LIKE queries are slower on large datasets)
+   **📖 See "PERISCOPE QUERY METHODS" section above for detailed comparison, performance metrics, and complete examples of all 3 methods.**
 
 ### 🧪 Testing Your Setup
 
